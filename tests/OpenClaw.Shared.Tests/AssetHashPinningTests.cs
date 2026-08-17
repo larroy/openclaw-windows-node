@@ -1,5 +1,7 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 using OpenClaw.Shared.Audio;
+using OpenClaw.Shared.Inference;
 using Xunit;
 
 namespace OpenClaw.Shared.Tests;
@@ -66,5 +68,51 @@ public class AssetHashPinningTests
             "Silero VAD model is missing a pinned SHA-256 hash. Add one to SileroVadModelManifest.");
         Assert.Matches(Sha256Hex, SileroVadModelManifest.Sha256);
         Assert.StartsWith("https://", SileroVadModelManifest.DownloadUrl);
+    }
+
+    [Fact]
+    public void EveryLlamaBackendAsset_HasPinnedSha256AndSize()
+    {
+        Assert.NotEmpty(LlamaBackendCatalog.Variants);
+        foreach (var variant in LlamaBackendCatalog.Variants)
+        {
+            Assert.True(variant.IsDownloadable,
+                $"llama.cpp variant '{variant.RuntimeKey}' is not downloadable. " +
+                "Every shipped variant must have a pinned SHA-256 on all of its assets.");
+
+            foreach (var asset in variant.Assets)
+            {
+                Assert.False(string.IsNullOrWhiteSpace(asset.Sha256),
+                    $"llama.cpp asset '{asset.FileName}' is missing a pinned SHA-256 hash.");
+                Assert.Matches(Sha256Hex, asset.Sha256!);
+                Assert.StartsWith("https://", asset.DownloadUrl);
+                Assert.True(asset.ApproximateSizeBytes > 0,
+                    $"llama.cpp asset '{asset.FileName}' is missing its size. " +
+                    "The size is cross-checked against the release API when pinning the hash.");
+            }
+        }
+    }
+
+    [Fact]
+    public void EveryPublishedLocalModel_HasPinnedSha256()
+    {
+        // Unpublished checkpoints legitimately carry no shards; they are not
+        // downloadable and cannot be selected. Anything with shards must be pinned.
+        var published = LocalModelCatalog.Models.Where(m => m.Shards.Count > 0).ToArray();
+        Assert.NotEmpty(published);
+
+        foreach (var model in published)
+        {
+            foreach (var shard in model.Shards)
+            {
+                Assert.False(string.IsNullOrWhiteSpace(shard.Sha256),
+                    $"GGUF shard '{shard.FileName}' of model '{model.Id}' is missing a pinned SHA-256 hash.");
+                Assert.Matches(Sha256Hex, shard.Sha256!);
+                Assert.StartsWith("https://", shard.DownloadUrl);
+                Assert.True(shard.SizeBytes > 0, $"GGUF shard '{shard.FileName}' is missing its size.");
+            }
+
+            Assert.True(model.IsDownloadable);
+        }
     }
 }
