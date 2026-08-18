@@ -6,7 +6,7 @@ inline; update it as phases land.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | 1 | Hardware probe, backend selection, model recommender | Landed |
-| 2 | Runtime and GGUF download managers | Not started (catalog hashes pinned, unblocked) |
+| 2 | Runtime and GGUF download managers | Landed |
 | 3 | Server process and settings UI | Not started |
 | 4 | Gateway provider registration | Not started (blocked on live schema) |
 | 5 | Optional `localinference.status` node capability | Not started |
@@ -125,31 +125,57 @@ Run recipes are stored as structured argument lists and deliberately exclude
 `-m`, `--host`, and `--port`, which the process launcher owns; a test enforces
 that separation.
 
-## Phase 2: download managers (blocked on hash pinning)
+## Phase 2: download managers (landed)
 
-`Inference/LlamaRuntimeManager.cs` and `Inference/GgufModelManager.cs`, modelled
-on `PiperVoiceManager` and `WhisperModelManager`:
+| File | Role |
+| --- | --- |
+| `Inference/VerifiedFileDownloader.cs` | Fetch to `.part`, verify SHA-256, then move. Shared by both managers. |
+| `Inference/SafeZipExtractor.cs` | Zip extraction with an explicit path-traversal guard. |
+| `Inference/LlamaRuntimeManager.cs` | Install and resolve a backend variant, or a custom build. |
+| `Inference/GgufModelManager.cs` | Download and manage multi-shard checkpoints. |
 
-- Per-key single flight via the existing `SingleFlightDownload.RunAsync`.
-- Stage to a `.tmp` file, verify SHA-256, and only then move or extract.
-- Delete the partial file on any failure.
-- Zip extraction rejects entries whose resolved path escapes the destination.
-- Runtimes land in `<tray-data>\llama\runtimes\<runtime-key>\`, models in
-  `<tray-data>\llama\models\<model-id>\`.
-- GGUF downloads need aggregate cross-shard progress, a free-disk-space
-  precheck, and `Range`-based resume. Restarting a 50 GB shard from zero after a
-  dropped connection is not acceptable.
+Decisions worth preserving:
+
+- **Nothing unverified reaches a final path.** A missing pinned hash fails before
+  any network traffic. A mismatch, a length disagreement, or a truncated
+  response deletes the partial file and throws. The error never echoes the
+  computed hash, which would be a confirmation oracle.
+- **Resume is opt-in per request.** GGUF shards run to tens of gigabytes, so a
+  dropped connection must be recoverable; small archives just restart. A server
+  that ignores `Range` and answers 200 triggers a clean restart rather than
+  appending a full body onto an existing prefix and corrupting the file. A
+  partial file at or past the expected size is discarded, since it is the
+  residue of an attempt that already failed verification and resuming from its
+  end would loop forever.
+- **A runtime directory is only trusted with its completion marker.** A CUDA
+  variant has two archives. An interrupted install can leave a directory holding
+  llama-server.exe but none of its CUDA DLLs, which would look installed and
+  then fail at launch with a missing-DLL error. The marker is written only after
+  every archive extracted and the executable was found; without it the directory
+  is torn down and rebuilt.
+- **Archives are deleted as they extract.** A CUDA pair is close to 800 MB and
+  keeping both would double peak disk use for no benefit.
+- **The server executable is located recursively.** Upstream has moved between a
+  flat layout and a build/bin layout across releases.
+- **Free space is checked before starting, counting only missing shards**, so
+  resuming a mostly-complete model is not blocked by the full model size.
+  Unknown free space proceeds rather than refusing.
+
+Both managers keep the existing per-key single-flight gate
+(`SingleFlightDownload.RunAsync`). Runtimes land under
+`llama/runtimes/<runtime-key>/` and models under `llama/models/<model-id>/` in
+the tray data directory, with upstream shard names preserved because llama.cpp
+discovers the remaining shards by name from the first one.
 
 **Custom local build.** When `LocalInferenceCustomRuntimePath` is set it wins
 over the catalog: validate the path, skip download and hashing entirely, and
 show an explicit "custom build, not verified" state so the bypass is never
 silent.
 
-GitHub does not publish release-asset hashes, so all nine `b10472` archives were
-downloaded, size-checked against the releases API, and hashed on 2026-08-17.
-Those values are pinned in `LlamaBackendCatalog` and guarded by
-`AssetHashPinningTests`, so this phase is unblocked. See
-`LOCAL_INFERENCE_ASSETS.md` for the provenance and its limits.
+All nine `b10472` archives were downloaded, size-checked against the releases
+API, and hashed on 2026-08-17; those values are pinned in `LlamaBackendCatalog`
+and guarded by `AssetHashPinningTests`. See `LOCAL_INFERENCE_ASSETS.md` for the
+provenance and its limits.
 
 ## Phase 3: server process and UI
 
@@ -243,10 +269,14 @@ Unit tests in `tests/OpenClaw.Shared.Tests/Inference/`:
 - nvidia-smi parsing against captured real output, including the multi-GPU,
   `[N/A]` memory, and missing-banner cases.
 
-Still to add in later phases: download managers against an `HttpMessageHandler`
-fake (corrupt body rejected, `.tmp` deleted, nothing at the final path,
-concurrent callers coalesced), zip traversal rejection, and the provider patch
-builder preserving unrelated config while blocking on a redaction sentinel.
+Phase 2 adds, against an in-memory `HttpMessageHandler` fake: tampered bodies
+and length disagreements rejected with no residue, resume via `Range`, clean
+restart when a server ignores `Range`, truncated-then-retried downloads,
+monotonic aggregate progress, traversal and sibling-prefix rejection in zip
+extraction, interrupted-install rebuild, and the free-space precheck.
+
+Still to add: the provider patch builder preserving unrelated config while
+blocking on a redaction sentinel.
 
 Required repo validation per `AGENTS.md`: `./build.ps1`, then the Shared and
 Tray test projects. In this linked worktree, set `OPENCLAW_REPO_ROOT` first or
