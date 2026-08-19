@@ -52,6 +52,11 @@ public static class NvidiaSmiParser
             var name = fields[0].Trim();
             if (name.Length == 0) continue;
 
+            // A GB10 host lists an "NVIDIA NPU" alongside the GPU. It shares the
+            // driver but is not a CUDA device, so counting it would put a phantom
+            // adapter in the UI and imply an accelerator llama.cpp cannot use.
+            if (IsNonCudaAccelerator(name)) continue;
+
             var memoryBytes = fields.Length > 1 ? ParseMebibytes(fields[1]) : null;
             var driver = fields.Length > 2 ? NullIfBlank(fields[2]) : null;
 
@@ -67,20 +72,41 @@ public static class NvidiaSmiParser
     }
 
     /// <summary>
+    /// Banner labels that precede the CUDA version, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// Older drivers print <c>CUDA Version: 12.8</c>. Newer ones (seen on a GB10
+    /// host with driver 616.29) print <c>CUDA UMD Version: 13.4</c> instead, which
+    /// does not contain the older marker as a substring. Missing the newer form
+    /// makes the probe report "unknown" on current hardware and silently degrade
+    /// to the older CUDA build, so both spellings are matched.
+    /// </remarks>
+    private static readonly string[] CudaVersionMarkers = ["CUDA UMD Version:", "CUDA Version:"];
+
+    /// <summary>
     /// Extract the CUDA major version from plain <c>nvidia-smi</c> output, whose
     /// header line reads e.g.
-    /// <c>| NVIDIA-SMI 570.86.10  Driver Version: 570.86.10  CUDA Version: 12.8 |</c>.
-    /// Returns null when the marker is missing or unparseable.
+    /// <c>| NVIDIA-SMI 570.86.10  Driver Version: 570.86.10  CUDA Version: 12.8 |</c>
+    /// or <c>| NVIDIA-SMI 616.29  KMD Version: 616.29  CUDA UMD Version: 13.4 |</c>.
+    /// Returns null when no marker is present or the value is unparseable.
     /// </summary>
     public static int? TryParseCudaMajorVersion(string? stdout)
     {
         if (string.IsNullOrWhiteSpace(stdout)) return null;
 
-        const string marker = "CUDA Version:";
-        var index = stdout.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        var index = -1;
+        var markerLength = 0;
+        foreach (var marker in CudaVersionMarkers)
+        {
+            index = stdout.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0) continue;
+            markerLength = marker.Length;
+            break;
+        }
+
         if (index < 0) return null;
 
-        var rest = stdout.AsSpan(index + marker.Length).TrimStart();
+        var rest = stdout.AsSpan(index + markerLength).TrimStart();
 
         // Take the leading digit run; "12.8" and "13" both yield the major part.
         var end = 0;
@@ -115,6 +141,17 @@ public static class NvidiaSmiParser
         static bool Contains(string haystack, string needle) =>
             haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// True for devices the NVIDIA driver enumerates that are not CUDA compute
+    /// devices. Matched as a whole word so an adapter whose name merely contains
+    /// these letters is not dropped.
+    /// </summary>
+    internal static bool IsNonCudaAccelerator(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(
+            name,
+            @"\bNPU\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private static long? ParseMebibytes(string field)
     {

@@ -81,6 +81,52 @@ public class NvidiaSmiParserTests
         Assert.Equal(13, NvidiaSmiParser.TryParseCudaMajorVersion("CUDA Version: 13"));
     }
 
+    [Fact]
+    public void TryParseCudaMajorVersion_ReadsTheNewerUmdBannerLabel()
+    {
+        // Captured from a GB10 host on driver 616.29. This label does not contain
+        // the older "CUDA Version:" marker as a substring, so missing it made the
+        // probe report "unknown" on current hardware and silently degrade to the
+        // older CUDA build.
+        const string banner =
+            """
+            Tue Aug 18 21:06:44 2026
+            +-----------------------------------------------------------------------------------------+
+            | NVIDIA-SMI 616.29                 KMD Version: 616.29        CUDA UMD Version: 13.4     |
+            """;
+
+        Assert.Equal(13, NvidiaSmiParser.TryParseCudaMajorVersion(banner));
+    }
+
+    [Fact]
+    public void ParseQueryGpu_SkipsTheNpuOnAGb10Host()
+    {
+        // The NVIDIA NPU shares the driver and appears in --query-gpu output, but
+        // it is not a CUDA device. Counting it would put a phantom adapter in the
+        // UI and imply an accelerator llama.cpp cannot use.
+        const string stdout =
+            """
+            NVIDIA RTX Spark N1X (5120-core Blackwell RTX GPU), 24512, 616.29
+            NVIDIA NPU, [N/A], 616.29
+            """;
+
+        var gpus = NvidiaSmiParser.ParseQueryGpu(stdout, cudaMajorVersion: 13);
+
+        var gpu = Assert.Single(gpus);
+        Assert.StartsWith("NVIDIA RTX Spark N1X", gpu.Name, System.StringComparison.Ordinal);
+        Assert.Equal(24512L * 1024 * 1024, gpu.DedicatedMemoryBytes);
+    }
+
+    [Theory]
+    [InlineData("NVIDIA NPU", true)]
+    [InlineData("nvidia npu", true)]
+    [InlineData("NVIDIA RTX Spark N1X (5120-core Blackwell RTX GPU)", false)]
+    [InlineData("NVIDIA GeForce RTX 4090", false)]
+    public void IsNonCudaAccelerator_MatchesWholeWordsOnly(string name, bool expected)
+    {
+        Assert.Equal(expected, NvidiaSmiParser.IsNonCudaAccelerator(name));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
