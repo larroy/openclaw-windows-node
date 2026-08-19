@@ -53,6 +53,94 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
         Assert.Contains("Authenticode verification failed", result.Detail);
     }
 
+    private const string WslPackageFamilyName =
+        "MicrosoftCorporationII.WindowsSubsystemForLinux_8wekyb3d8bbwe";
+    private const string NonCanonicalWslRelayPath = @"C:\Program Files\WSL\wslrelay.exe";
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeFailsButWslPackageCorroborates_IsTrusted()
+    {
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            NonCanonicalWslRelayPath,
+            () => new AppxPackageInfo(
+                WslPackageFamilyName,
+                "CN=Microsoft Windows, O=Microsoft Corporation, C=US",
+                "Developer"));
+
+        Assert.True(result.IsTrusted, result.Detail);
+    }
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeFailsAndNoWslPackageFound_IsRejectedWithOriginalDetail()
+    {
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            NonCanonicalWslRelayPath,
+            () => null);
+
+        Assert.False(result.IsTrusted);
+        Assert.Contains("Authenticode", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeFailsAndWslPackageFamilyNameMismatches_IsRejected()
+    {
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            NonCanonicalWslRelayPath,
+            () => new AppxPackageInfo(
+                "SomeImpostor.WindowsSubsystemForLinux_deadbeefcafe",
+                "CN=Microsoft Windows, O=Microsoft Corporation, C=US",
+                "Developer"));
+
+        Assert.False(result.IsTrusted);
+    }
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeFailsAndWslPackageUnsigned_IsRejected()
+    {
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            NonCanonicalWslRelayPath,
+            () => new AppxPackageInfo(
+                WslPackageFamilyName,
+                "CN=Microsoft Windows, O=Microsoft Corporation, C=US",
+                "None"));
+
+        Assert.False(result.IsTrusted);
+        Assert.Contains("WSL package", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeFailsAndWslPackagePublisherNotMicrosoft_IsRejected()
+    {
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            NonCanonicalWslRelayPath,
+            () => new AppxPackageInfo(
+                WslPackageFamilyName,
+                "CN=Evil Corp, O=Evil Corp, C=US",
+                "Developer"));
+
+        Assert.False(result.IsTrusted);
+        Assert.Contains("WSL package", result.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VerifyMicrosoftSignedFile_AuthenticodeSucceeds_NeverConsultsWslPackageFallback()
+    {
+        var windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var wslPath = Path.Combine(windowsDir, "System32", "wsl.exe");
+        var fallbackInvoked = false;
+
+        var result = WindowsAuthenticodeVerifier.VerifyMicrosoftSignedFile(
+            wslPath,
+            () =>
+            {
+                fallbackInvoked = true;
+                throw new InvalidOperationException("Fallback should not be consulted.");
+            });
+
+        Assert.True(result.IsTrusted, result.Detail);
+        Assert.False(fallbackInvoked);
+    }
+
     [Theory]
     [InlineData("CN=Microsoft Windows, O=Microsoft Corporation, C=US", true)]
     [InlineData("CN=Microsoft Corporation Test Certificate, O=Example Corp, C=US", false)]
