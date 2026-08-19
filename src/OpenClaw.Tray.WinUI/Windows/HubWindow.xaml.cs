@@ -1089,6 +1089,7 @@ public sealed partial class HubWindow : WindowEx
             case PermissionsPage: break;
             case SandboxPage sandbox: sandbox.Initialize(); break;
             case VoiceSettingsPage voice: voice.Initialize(CurrentApp.VoiceService); break;
+            case LocalInferencePage localInference: localInference.Initialize(CurrentApp.LocalInference); break;
             case AgentEventsPage agentEvents:
                 agentEvents.Initialize(this);
                 agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();

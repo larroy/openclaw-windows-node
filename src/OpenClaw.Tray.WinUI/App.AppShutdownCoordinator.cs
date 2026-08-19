@@ -138,6 +138,26 @@ public partial class App
             }));
         }
 
+        var localInference = _localInference;
+        if (localInference is not null)
+        {
+            // The job object kills llama-server if we die abruptly, but an
+            // orderly shutdown should release the GPU before the app exits so a
+            // quick restart does not hit an out-of-memory allocation.
+            steps.Add(new AppShutdownStep("local inference server", async () =>
+            {
+                try
+                {
+                    await localInference.DisposeAsync();
+                }
+                finally
+                {
+                    if (ReferenceEquals(_localInference, localInference))
+                        _localInference = null;
+                }
+            }));
+        }
+
         steps.Add(new AppShutdownStep("ssh tunnel service", () =>
         {
             _sshTunnelService?.Dispose();

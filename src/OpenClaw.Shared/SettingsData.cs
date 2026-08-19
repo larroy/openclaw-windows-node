@@ -221,6 +221,48 @@ public record class SettingsData
 
     // ── (Voice / STT settings consolidated into the block above.) ──
 
+    // ── Local inference (llama.cpp) ──
+
+    /// <summary>
+    /// Master switch for running a model locally. When false no runtime or model
+    /// is downloaded and no server is started.
+    /// </summary>
+    public bool LocalInferenceEnabled { get; set; } = false;
+
+    /// <summary>Catalog id of the selected model, or null to use the recommendation.</summary>
+    public string? LocalInferenceModelId { get; set; }
+
+    /// <summary>
+    /// Explicit backend override (<c>Cpu</c>, <c>Cuda12</c>, <c>Cuda13</c>,
+    /// <c>Vulkan</c>), or null to select automatically from detected hardware.
+    /// An override naming a build this release does not ship for the host
+    /// architecture is ignored rather than honored into a dead end.
+    /// </summary>
+    public string? LocalInferenceBackendOverride { get; set; }
+
+    /// <summary>
+    /// Path to a user-built <c>llama-server.exe</c>, or the directory holding it.
+    /// When set it wins over the pinned catalog and skips download and hash
+    /// verification, so the UI must show the unverified state explicitly.
+    /// </summary>
+    public string? LocalInferenceCustomRuntimePath { get; set; }
+
+    /// <summary>Fixed port for the local server, or null to allocate a free one.</summary>
+    public int? LocalInferencePort { get; set; }
+
+    /// <summary>Start the local server automatically when the app starts.</summary>
+    public bool LocalInferenceAutoStart { get; set; } = false;
+
+    /// <summary>Register the local endpoint with the gateway once it is healthy.</summary>
+    public bool LocalInferenceRegisterWithGateway { get; set; } = true;
+
+    /// <summary>
+    /// Bind the local server to all interfaces instead of loopback. Required for
+    /// a NAT-mode WSL gateway to reach it, and off by default because it exposes
+    /// an unauthenticated inference endpoint to the network.
+    /// </summary>
+    public bool LocalInferenceBindBeyondLoopback { get; set; } = false;
+
     private static readonly JsonSerializerOptions s_options = new()
     {
         WriteIndented = true,

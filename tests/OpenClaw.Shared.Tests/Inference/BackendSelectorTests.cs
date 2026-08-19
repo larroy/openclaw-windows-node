@@ -91,6 +91,28 @@ public class BackendSelectorTests
     }
 
     [Fact]
+    public void Arm64WithACuda12Driver_UsesTheCuda13BuildAndSaysWhy()
+    {
+        // The pinned release ships no CUDA 12 ARM64 build, so an ARM64 host with
+        // a CUDA 12 driver has to take the CUDA 13 runtime. That may not load,
+        // and the user should read why rather than a bare driver error.
+        var plan = BackendSelector.Select(Host(Arch.Arm64, gpus: [Nvidia(cudaMajor: 12)]));
+
+        Assert.Equal(LlamaBackend.Cuda13, plan.Preferred!.Backend);
+        Assert.Equal(Arch.Arm64, plan.Preferred.Architecture);
+        Assert.Contains("may not load", plan.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MatchingCudaVersion_DoesNotWarnAboutTheRuntime()
+    {
+        var plan = BackendSelector.Select(Host(gpus: [Nvidia(cudaMajor: 12)]));
+
+        Assert.Equal(LlamaBackend.Cuda12, plan.Preferred!.Backend);
+        Assert.DoesNotContain("may not load", plan.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void AmdGpuWithVulkanLoader_SelectsVulkan()
     {
         var gpus = new[] { new GpuInfo(GpuVendor.Amd, "AMD Radeon RX 7900 XTX") };

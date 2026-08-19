@@ -6988,4 +6988,160 @@ Make sure the gateway is running.</value>
   <data name="SessionsPage_LastRunStopped" xml:space="preserve">
     <value>Last run stopped</value>
   </data>
+  <data name="LocalInferencePage_PageTitle.Text" xml:space="preserve">
+    <value>Local Inference</value>
+  </data>
+  <data name="LocalInferencePage_PageDescription.Text" xml:space="preserve">
+    <value>Run a model on this machine with llama.cpp. Weights and the runtime are downloaded once and stay on your device.</value>
+  </data>
+  <data name="LocalInferencePage_HardwareHeader.Text" xml:space="preserve">
+    <value>Detected hardware</value>
+  </data>
+  <data name="LocalInferencePage_RedetectButtonText.Text" xml:space="preserve">
+    <value>Re-detect hardware</value>
+  </data>
+  <data name="LocalInferencePage_ModelHeader.Text" xml:space="preserve">
+    <value>Model</value>
+  </data>
+  <data name="LocalInferencePage_ModelCombo.Header" xml:space="preserve">
+    <value>Model</value>
+  </data>
+  <data name="LocalInferencePage_DownloadButtonText.Text" xml:space="preserve">
+    <value>Download model</value>
+  </data>
+  <data name="LocalInferencePage_CancelDownloadButtonText.Text" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="LocalInferencePage_DeleteModelButtonText.Text" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="LocalInferencePage_ServerHeader.Text" xml:space="preserve">
+    <value>Server</value>
+  </data>
+  <data name="LocalInferencePage_EnabledToggle.Header" xml:space="preserve">
+    <value>Enable local inference</value>
+  </data>
+  <data name="LocalInferencePage_StartButtonText.Text" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="LocalInferencePage_StopButtonText.Text" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="LocalInferencePage_EndpointLabel.Text" xml:space="preserve">
+    <value>OpenAI-compatible endpoint</value>
+  </data>
+  <data name="LocalInferencePage_CopyEndpointButtonText.Text" xml:space="preserve">
+    <value>Copy</value>
+  </data>
+  <data name="LocalInferencePage_AdvancedHeader.Text" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="LocalInferencePage_BackendCombo.Header" xml:space="preserve">
+    <value>Compute backend</value>
+  </data>
+  <data name="LocalInferencePage_CustomRuntimeBox.Header" xml:space="preserve">
+    <value>Custom llama-server build (optional)</value>
+  </data>
+  <data name="LocalInferencePage_CustomRuntimeBox.PlaceholderText" xml:space="preserve">
+    <value>Path to llama-server.exe or its folder</value>
+  </data>
+  <data name="LocalInferencePage_CustomRuntimeNoticeText.Text" xml:space="preserve">
+    <value>A custom build is in use. It is not integrity verified, so only point this at a binary you built or trust.</value>
+  </data>
+  <data name="LocalInferencePage_AutoStartCheck.Content" xml:space="preserve">
+    <value>Start the server when the app starts</value>
+  </data>
+  <data name="LocalInferencePage_RegisterCheck.Content" xml:space="preserve">
+    <value>Register this endpoint with the gateway</value>
+  </data>
+  <data name="LocalInferencePage_BindBeyondLoopbackCheck.Content" xml:space="preserve">
+    <value>Accept connections from other machines</value>
+  </data>
+  <data name="LocalInferencePage_BindBeyondLoopbackHelp.Text" xml:space="preserve">
+    <value>Needed when the gateway runs in a WSL distro that cannot reach this machine on localhost. The endpoint has no authentication, so anyone who can reach this port can use the model.</value>
+  </data>
+  <data name="LocalInferencePage_HardwareUnavailable" xml:space="preserve">
+    <value>Hardware could not be detected.</value>
+  </data>
+  <data name="LocalInferencePage_HardwareDetecting" xml:space="preserve">
+    <value>Detecting hardware...</value>
+  </data>
+  <data name="LocalInferencePage_HardwareRam" xml:space="preserve">
+    <value>{0} RAM</value>
+  </data>
+  <data name="LocalInferencePage_HardwareNoGpu" xml:space="preserve">
+    <value>No supported GPU detected</value>
+  </data>
+  <data name="LocalInferencePage_BackendAutomatic" xml:space="preserve">
+    <value>Automatic (recommended)</value>
+  </data>
+  <data name="LocalInferencePage_ModelUnavailableSuffix" xml:space="preserve">
+    <value>{0} (not available yet)</value>
+  </data>
+  <data name="LocalInferencePage_ModelReady" xml:space="preserve">
+    <value>Model ready</value>
+  </data>
+  <data name="LocalInferencePage_ModelNotDownloaded" xml:space="preserve">
+    <value>Not downloaded</value>
+  </data>
+  <data name="LocalInferencePage_ModelPartial" xml:space="preserve">
+    <value>{0} of {1} files downloaded</value>
+  </data>
+  <data name="LocalInferencePage_LargeDownloadNotice" xml:space="preserve">
+    <value>This model is about {0} and will take a long time to download.</value>
+  </data>
+  <data name="LocalInferencePage_StatusPreparing" xml:space="preserve">
+    <value>Preparing...</value>
+  </data>
+  <data name="LocalInferencePage_StatusRuntimePct" xml:space="preserve">
+    <value>Downloading runtime: {0}%</value>
+  </data>
+  <data name="LocalInferencePage_StatusModelPct" xml:space="preserve">
+    <value>Downloading model: {0}%</value>
+  </data>
+  <data name="LocalInferencePage_StatusDownloadCanceled" xml:space="preserve">
+    <value>Download canceled</value>
+  </data>
+  <data name="LocalInferencePage_StatusDownloadError" xml:space="preserve">
+    <value>Download failed. See the log for details.</value>
+  </data>
+  <data name="LocalInferencePage_ServerStopped" xml:space="preserve">
+    <value>Stopped</value>
+  </data>
+  <data name="LocalInferencePage_ServerStarting" xml:space="preserve">
+    <value>Starting, loading weights...</value>
+  </data>
+  <data name="LocalInferencePage_ServerReady" xml:space="preserve">
+    <value>Ready on port {0}</value>
+  </data>
+  <data name="LocalInferencePage_ServerFailed" xml:space="preserve">
+    <value>The server could not start</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDownloadTitle" xml:space="preserve">
+    <value>Download this model?</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDownloadBody" xml:space="preserve">
+    <value>{0} is about {1}. The download can take hours and cannot be paused across app restarts without re-checking each file.</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDownloadPrimary" xml:space="preserve">
+    <value>Download</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDownloadCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDeleteTitle" xml:space="preserve">
+    <value>Delete this model?</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDeleteBody" xml:space="preserve">
+    <value>This frees about {1} of disk space. Downloading {0} again will take the same time as the first download.</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmDeletePrimary" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="LocalInferencePage_ConfirmCancelButtonText.Text" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="LocalInferencePage_StatusDeleteError" xml:space="preserve">
+    <value>Could not delete the model. See the log for details.</value>
+  </data>
 </root>

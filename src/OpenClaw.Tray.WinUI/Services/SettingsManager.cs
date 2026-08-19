@@ -128,6 +128,25 @@ public class SettingsManager
     /// <summary>Play audio feedback chimes on listen start/stop.</summary>
     public bool VoiceAudioFeedback { get => _data.VoiceAudioFeedback; set => _data = _data with { VoiceAudioFeedback = value }; }
     public bool NodeTtsEnabled { get => _data.NodeTtsEnabled; set => _data = _data with { NodeTtsEnabled = value }; }
+
+    // ── Local inference (llama.cpp) ──
+
+    /// <summary>Master switch for running a model locally.</summary>
+    public bool LocalInferenceEnabled { get => _data.LocalInferenceEnabled; set => _data = _data with { LocalInferenceEnabled = value }; }
+    /// <summary>Catalog id of the chosen model, or null to follow the recommendation.</summary>
+    public string? LocalInferenceModelId { get => _data.LocalInferenceModelId; set => _data = _data with { LocalInferenceModelId = value }; }
+    /// <summary>Backend override name, or null for automatic selection.</summary>
+    public string? LocalInferenceBackendOverride { get => _data.LocalInferenceBackendOverride; set => _data = _data with { LocalInferenceBackendOverride = value }; }
+    /// <summary>Path to a user-built llama-server, which skips hash verification.</summary>
+    public string? LocalInferenceCustomRuntimePath { get => _data.LocalInferenceCustomRuntimePath; set => _data = _data with { LocalInferenceCustomRuntimePath = value }; }
+    /// <summary>Fixed server port, or null to allocate a free one.</summary>
+    public int? LocalInferencePort { get => _data.LocalInferencePort; set => _data = _data with { LocalInferencePort = value }; }
+    /// <summary>Start the local server on app start.</summary>
+    public bool LocalInferenceAutoStart { get => _data.LocalInferenceAutoStart; set => _data = _data with { LocalInferenceAutoStart = value }; }
+    /// <summary>Register the healthy local endpoint with the gateway.</summary>
+    public bool LocalInferenceRegisterWithGateway { get => _data.LocalInferenceRegisterWithGateway; set => _data = _data with { LocalInferenceRegisterWithGateway = value }; }
+    /// <summary>Bind beyond loopback, exposing an unauthenticated endpoint to the network.</summary>
+    public bool LocalInferenceBindBeyondLoopback { get => _data.LocalInferenceBindBeyondLoopback; set => _data = _data with { LocalInferenceBindBeyondLoopback = value }; }
     public string TtsProvider { get => string.IsNullOrWhiteSpace(_data.TtsProvider) ? TtsCapability.PiperProvider : _data.TtsProvider; set => _data = _data with { TtsProvider = value }; }
     public string TtsElevenLabsApiKey { get => _data.TtsElevenLabsApiKey ?? ""; set => _data = _data with { TtsElevenLabsApiKey = value }; }
     public string TtsElevenLabsModel { get => _data.TtsElevenLabsModel ?? ""; set => _data = _data with { TtsElevenLabsModel = value }; }

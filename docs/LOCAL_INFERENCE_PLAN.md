@@ -7,7 +7,7 @@ inline; update it as phases land.
 | --- | --- | --- |
 | 1 | Hardware probe, backend selection, model recommender | Landed |
 | 2 | Runtime and GGUF download managers | Landed |
-| 3 | Server process and settings UI | Not started |
+| 3 | Server process and settings UI | Landed |
 | 4 | Gateway provider registration | Not started (blocked on live schema) |
 | 5 | Optional `localinference.status` node capability | Not started |
 
@@ -177,37 +177,60 @@ API, and hashed on 2026-08-17; those values are pinned in `LlamaBackendCatalog`
 and guarded by `AssetHashPinningTests`. See `LOCAL_INFERENCE_ASSETS.md` for the
 provenance and its limits.
 
-## Phase 3: server process and UI
+## Phase 3: server process and UI (landed)
 
-`OpenClawTray.Services.LlamaServerProcess` spawns `llama-server.exe` with
-`--port <p> --host 127.0.0.1 -m <model>` plus the recipe args.
+| File | Role |
+| --- | --- |
+| `Inference/LlamaServerArguments.cs` | Pure argument and URL construction. |
+| `Inference/ProcessJobObject.cs` | Kill-on-close Win32 job object. |
+| `Inference/LlamaServerProcess.cs` | Launch, health poll, stderr tail, stop. |
+| `Inference/LocalInferenceService.cs` | Sequences probe, selector, runtime, model, server. |
+| `Pages/LocalInferencePage.xaml{,.cs}` | Settings surface. |
+| `Services/DisplayAdapterEnumerator.cs` | Registry adapter fallback injected into the probe. |
 
-- Port comes from a free-port scan; reuse `PortDiagnosticsService` and
-  `WindowsTcpListenerSnapshot` for conflict reporting.
-- Bind to `127.0.0.1` by default. Binding beyond loopback exposes an
-  unauthenticated inference endpoint to the LAN and must be an explicit, warned
-  opt-in.
-- Health: poll `GET /health` until ready or timeout, and surface the stderr tail
-  on failure. A recipe flag an older build does not know fails here, and the
-  user needs to see why.
-- Assign the child to a Win32 job object with
-  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` so a tray crash cannot orphan a process
-  holding tens of gigabytes of VRAM. Graceful stop via `AppShutdownCoordinator`.
+The server host lives in `OpenClaw.Shared` rather than the tray project because
+it has no WinUI dependency, which keeps the whole flow unit testable.
 
-`Pages/LocalInferencePage.xaml{,.cs}` follows `VoiceSettingsPage`, the closest
-analogue: catalog combo, download button, progress bar driven by
-`IProgress<(long downloaded, long total)>`, page-held `CancellationTokenSource`,
-status text from resources. Register it in `Presentation/HubPageRegistry.cs`
-(enum value, tag string, type map) and wire `Initialize` in
-`Windows/HubWindow.xaml.cs`. All strings go through `LocalizationHelper` and
-`Strings/en-us/Resources.resw`, with no em dashes per `AGENTS.md`.
+Decisions worth preserving:
 
-Settings added to `SettingsData`: `LocalInferenceEnabled`,
-`LocalInferenceModelId`, `LocalInferenceBackendOverride`,
-`LocalInferenceCustomRuntimePath`, `LocalInferencePort`,
-`LocalInferenceAutoStart`, `LocalInferenceRegisterWithGateway`,
-`LocalInferenceBindBeyondLoopback`. Change effects route through
-`SettingsChangeCoordinator` and `SettingsChangeEffects`.
+- **The child runs inside a kill-on-close job object.** Without it a tray crash
+  leaves llama-server holding tens of gigabytes of VRAM with no UI left to stop
+  it, and the next launch fails on a port conflict or an allocation error. A test
+  proves an assigned process really dies when the job handle closes. Job creation
+  failure is logged and tolerated: losing the safety net beats refusing to run.
+- **The health poll checks for child exit each tick.** A rejected recipe flag
+  makes llama-server exit immediately; without that check the user would wait out
+  the full ten-minute ready timeout for an error that was known in a second.
+- **stderr is tailed, stdout is drained but discarded.** The tail is the only
+  place a bad flag or a CUDA initialization failure is explained. stdout is
+  llama-server's request logging, which would put prompt content into our
+  diagnostics, so it is read only to keep the pipe from blocking the child.
+- **`-m`, `--host`, and `--port` are launcher-owned.** A recipe that sets one is
+  rejected rather than silently duplicated or overridden.
+- **Loopback unless explicitly widened.** Binding all interfaces exposes an
+  unauthenticated inference endpoint to the LAN, so it is a separate opt-in with
+  its own warning, and the health poll still targets loopback.
+- **Start never begins a download.** Kicking off a multi-hour transfer from a
+  Start button would be a surprising amount of work to trigger by accident.
+- **Confirmation is inline, not a `ContentDialog`.** `REACTOR_DIALOG_001` keeps
+  new surfaces off imperative dialogs; the per-file suppressions in
+  `.editorconfig` are deliberately not extended. An in-page bar also keeps the
+  size being confirmed on screen.
+- **Progress repaints are throttled to 150 ms.** A 22 GB model produces roughly
+  280,000 progress callbacks; repainting on each saturates the dispatcher.
+
+Settings live on `SettingsData` with `SettingsManager` passthroughs:
+`LocalInferenceEnabled`, `LocalInferenceModelId`,
+`LocalInferenceBackendOverride`, `LocalInferenceCustomRuntimePath`,
+`LocalInferencePort`, `LocalInferenceAutoStart`,
+`LocalInferenceRegisterWithGateway`, `LocalInferenceBindBeyondLoopback`.
+
+The page is registered in `Presentation/HubPageRegistry.cs` and initialized from
+`Windows/HubWindow.xaml.cs`. `App` builds the service lazily and the shutdown
+coordinator stops the server so the GPU is released before exit; the job object
+remains the crash backstop, not a substitute for an orderly stop. Strings are
+seeded English-only across all five locales using the repo's
+deferred-translation pattern and registered in `LocalizationValidationTests`.
 
 ## Phase 4: gateway registration (blocked on live schema)
 

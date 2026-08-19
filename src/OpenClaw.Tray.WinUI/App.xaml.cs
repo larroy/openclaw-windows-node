@@ -118,6 +118,33 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
             new AppLogger());
 
     /// <summary>
+    /// Local llama.cpp inference. Constructed on first use because the hardware
+    /// probe shells out to nvidia-smi and nothing needs it until the user opens
+    /// the page or auto-start runs.
+    /// </summary>
+    internal OpenClaw.Shared.Inference.LocalInferenceService LocalInference =>
+        _localInference ??= BuildLocalInferenceService();
+
+    internal OpenClaw.Shared.Inference.LocalInferenceService? LocalInferenceOrNull => _localInference;
+
+    private OpenClaw.Shared.Inference.LocalInferenceService BuildLocalInferenceService()
+    {
+        var logger = new AppLogger();
+        var dataDirectory = SettingsManager.SettingsDirectoryPath;
+
+        return new OpenClaw.Shared.Inference.LocalInferenceService(
+            new OpenClaw.Shared.Inference.HardwareProbe(
+                new LocalCommandRunner(logger),
+                logger,
+                fallbackGpuEnumerator: DisplayAdapterEnumerator.Enumerate),
+            new OpenClaw.Shared.Inference.LlamaRuntimeManager(dataDirectory, logger),
+            new OpenClaw.Shared.Inference.GgufModelManager(dataDirectory, logger),
+            new OpenClaw.Shared.Inference.LlamaServerProcess(logger),
+            () => Settings.ToSettingsData(),
+            logger);
+    }
+
+    /// <summary>
     /// Session key that the chat surface should select on its next mount.
     /// Used when the user clicks a session from SessionsPage or a notification
     /// while the HubWindow may not yet exist. Consumed (cleared) by ChatPage.
@@ -256,6 +283,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
     // Node service (optional, enabled in settings)
     private NodeService? _nodeService;
     private ExecApprovalsStore? _execApprovalsStore;
+    private OpenClaw.Shared.Inference.LocalInferenceService? _localInference;
     private string[]? _startupArgs;
     private string? _pendingProtocolUri;
     private bool _isPostSetupRestart;

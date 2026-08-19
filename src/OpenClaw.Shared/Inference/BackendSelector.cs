@@ -100,10 +100,22 @@ public static class BackendSelector
                 if (cpu is not null) chain.Add(cpu);
 
                 var cudaLabel = hardware.MaxCudaMajorVersion is { } major ? $"CUDA {major}.x" : "CUDA version unknown";
-                return new BackendPlan(
-                    chosen,
-                    chain,
-                    $"NVIDIA GPU detected ({cudaLabel}); using {chosen.DisplayName}.");
+                var reason = $"NVIDIA GPU detected ({cudaLabel}); using {chosen.DisplayName}.";
+
+                // The preferred build can be unavailable for this architecture:
+                // the pinned release ships no CUDA 12 ARM64 build, so an ARM64
+                // host with a CUDA 12 driver lands on the CUDA 13 build. That may
+                // fail to load, and the fallback chain will handle it, but the
+                // user is told rather than left to read a driver error.
+                if (!wantsCuda13
+                    && chosen.Backend == LlamaBackend.Cuda13
+                    && hardware.MaxCudaMajorVersion is { } reported)
+                {
+                    reason += $" This release has no CUDA {reported} build for {arch}, " +
+                              "so a newer CUDA runtime is used and may not load with the installed driver.";
+                }
+
+                return new BackendPlan(chosen, chain, reason);
             }
 
             // NVIDIA hardware but no CUDA build for this architecture.
