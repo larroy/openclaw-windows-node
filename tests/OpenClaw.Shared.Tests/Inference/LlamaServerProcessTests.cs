@@ -129,6 +129,21 @@ public class LlamaServerProcessTests
             new LlamaServerStatus(LlamaServerState.Ready, 8080).LoopbackBaseUrl);
     }
 
+    [Theory]
+    // A crash while serving is the only case worth reporting as a failure.
+    [InlineData(LlamaServerState.Ready, false, true)]
+    // A deliberate stop kills the child; reporting that as "stopped unexpectedly"
+    // made the UI flash a failure on every normal Stop. Observed on a real run.
+    [InlineData(LlamaServerState.Ready, true, false)]
+    [InlineData(LlamaServerState.Starting, false, false)]
+    [InlineData(LlamaServerState.Stopped, false, false)]
+    [InlineData(LlamaServerState.Failed, false, false)]
+    public void ShouldReportUnexpectedExit_OnlyForAnUnrequestedExitWhileServing(
+        LlamaServerState state, bool stopRequested, bool expected)
+    {
+        Assert.Equal(expected, LlamaServerProcess.ShouldReportUnexpectedExit(state, stopRequested));
+    }
+
     [Fact]
     public void JobObjectIsCreatableOnThisHost()
     {

@@ -78,6 +78,9 @@ public sealed class LlamaServerProcess : IAsyncDisposable
     private ConcurrentQueue<string> _stderrTail = new();
     private LlamaServerStatus _status = LlamaServerStatus.Stopped;
 
+    /// <summary>Set while a deliberate stop is in progress, so the resulting child exit is not reported as a crash.</summary>
+    private volatile bool _stopRequested;
+
     public LlamaServerProcess(IOpenClawLogger logger, Func<HttpClient>? httpClientFactory = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -143,6 +146,7 @@ public sealed class LlamaServerProcess : IAsyncDisposable
                     "The endpoint is unauthenticated and reachable from the network.");
             }
 
+            _stopRequested = false;
             SetStatus(new LlamaServerStatus(LlamaServerState.Starting, resolvedPort));
 
             if (!TryLaunch(runtime, argv, out var launchError))
@@ -305,6 +309,13 @@ public sealed class LlamaServerProcess : IAsyncDisposable
 
         if (process is not null)
         {
+            // Detach the exit handler BEFORE killing. Otherwise a deliberate stop
+            // raises Exited while the status is still Ready and gets reported as
+            // "the server stopped unexpectedly", so the UI flashes a failure on
+            // every normal Stop. Observed on a real run before this was fixed.
+            process.Exited -= OnProcessExited;
+            _stopRequested = true;
+
             try
             {
                 if (!process.HasExited)
@@ -323,7 +334,6 @@ public sealed class LlamaServerProcess : IAsyncDisposable
             {
                 process.ErrorDataReceived -= OnStderr;
                 process.OutputDataReceived -= OnStdout;
-                process.Exited -= OnProcessExited;
                 process.Dispose();
             }
         }
@@ -351,16 +361,24 @@ public sealed class LlamaServerProcess : IAsyncDisposable
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        // An exit while we believed the server was serving is a crash, not a
-        // stop; surface it so the UI does not keep claiming Ready.
-        if (_status.State is LlamaServerState.Ready)
-        {
-            SetStatus(new LlamaServerStatus(
-                LlamaServerState.Failed,
-                _status.Port,
-                $"The server stopped unexpectedly. {DescribeStderrTail()}"));
-        }
+        if (!ShouldReportUnexpectedExit(_status.State, _stopRequested)) return;
+
+        SetStatus(new LlamaServerStatus(
+            LlamaServerState.Failed,
+            _status.Port,
+            $"The server stopped unexpectedly. {DescribeStderrTail()}"));
     }
+
+    /// <summary>
+    /// Whether a child exit should be surfaced as a crash.
+    /// </summary>
+    /// <remarks>
+    /// Only an exit we did not ask for, while we believed the server was serving,
+    /// is a crash. An exit during a deliberate stop is the expected outcome, and
+    /// reporting it as a failure makes every normal Stop look like an error.
+    /// </remarks>
+    internal static bool ShouldReportUnexpectedExit(LlamaServerState state, bool stopRequested) =>
+        !stopRequested && state is LlamaServerState.Ready;
 
     private string DescribeStderrTail()
     {

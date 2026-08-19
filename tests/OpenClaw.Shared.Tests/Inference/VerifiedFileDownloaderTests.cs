@@ -223,6 +223,68 @@ public class VerifiedFileDownloaderTests
     }
 
     [Fact]
+    public async Task ResumesAfterTheConnectionDropsMidTransfer()
+    {
+        // Reproduces a real failure: a 21 GB download died at 50% on a socket
+        // read. The transfer must continue from the bytes already on disk rather
+        // than failing or starting over.
+        using var temp = new TempDirectory();
+        var (body, hash) = FakeHttpTransport.MakeBody(60_000, seed: 20);
+        var transport = new FakeHttpTransport();
+        transport.Add(Url, body);
+        transport.DropConnectionAfter(Url, afterBytes: 25_000);
+
+        var destination = temp.Combine("asset.bin");
+        await NewDownloader(transport).DownloadAsync(
+            new VerifiedDownloadRequest(Url, destination, hash, body.Length, AllowResume: true));
+
+        Assert.Equal(body, await File.ReadAllBytesAsync(destination));
+        Assert.Equal(2, transport.Requests.Count);
+        // The retry resumed rather than restarting from zero.
+        Assert.Null(transport.RangeHeaders[0]);
+        Assert.NotNull(transport.RangeHeaders[1]);
+    }
+
+    [Fact]
+    public async Task KeepsThePartialFileWhenEveryAttemptIsExhausted()
+    {
+        // Deleting it would discard gigabytes of good bytes for a network fault
+        // that says nothing about their validity.
+        using var temp = new TempDirectory();
+        var (body, hash) = FakeHttpTransport.MakeBody(60_000, seed: 21);
+        var transport = new FakeHttpTransport();
+        transport.Add(Url, body);
+        transport.DropConnectionAfter(Url, afterBytes: 10_000, times: 99);
+
+        var destination = temp.Combine("asset.bin");
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            NewDownloader(transport).DownloadAsync(
+                new VerifiedDownloadRequest(Url, destination, hash, body.Length, AllowResume: true)));
+
+        Assert.False(File.Exists(destination));
+        Assert.True(File.Exists(destination + ".part"), "The partial file must survive a transport failure.");
+        Assert.True(new FileInfo(destination + ".part").Length > 0);
+    }
+
+    [Fact]
+    public async Task StopsRetryingAfterABoundedNumberOfAttempts()
+    {
+        using var temp = new TempDirectory();
+        var (body, hash) = FakeHttpTransport.MakeBody(60_000, seed: 22);
+        var transport = new FakeHttpTransport();
+        transport.Add(Url, body);
+        transport.DropConnectionAfter(Url, afterBytes: 10_000, times: 99);
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            NewDownloader(transport).DownloadAsync(
+                new VerifiedDownloadRequest(Url, temp.Combine("asset.bin"), hash, body.Length, AllowResume: true)));
+
+        // Bounded, so a permanently broken source fails instead of looping.
+        Assert.InRange(transport.Requests.Count, 2, 10);
+    }
+
+    [Fact]
     public async Task ReportsMonotonicProgressEndingAtTheFullSize()
     {
         using var temp = new TempDirectory();
@@ -258,8 +320,12 @@ public class VerifiedFileDownloaderTests
         Assert.False(File.Exists(destination + ".part"));
     }
 
+    /// <summary>
+    /// Retry backoff is zeroed so the retry paths cost no wall-clock time; the
+    /// production default is a real escalating delay.
+    /// </summary>
     private static VerifiedFileDownloader NewDownloader(FakeHttpTransport transport) =>
-        new(NullLogger.Instance, transport.ClientFactory);
+        new(NullLogger.Instance, transport.ClientFactory, retryDelay: _ => TimeSpan.Zero);
 
     /// <summary>
     /// <see cref="Progress{T}"/> posts to the synchronization context, so reports

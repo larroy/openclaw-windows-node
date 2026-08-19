@@ -59,19 +59,37 @@ public sealed class VerifiedFileDownloader
 {
     private const int BufferSize = 81920;
 
+    /// <summary>
+    /// How many times a transfer is attempted before giving up. Each retry
+    /// resumes from the bytes already on disk when the request allows it.
+    /// </summary>
+    private const int MaxTransportAttempts = 5;
+
     private readonly IOpenClawLogger _logger;
     private readonly Func<HttpClient> _httpClientFactory;
+    private readonly Func<int, TimeSpan> _retryDelay;
 
     /// <param name="logger">Diagnostics sink.</param>
     /// <param name="httpClientFactory">
     /// Optional override so tests can inject a fake handler. Each call gets a
     /// client that the downloader disposes.
     /// </param>
-    public VerifiedFileDownloader(IOpenClawLogger logger, Func<HttpClient>? httpClientFactory = null)
+    /// <param name="retryDelay">
+    /// Backoff before retry attempt N. Injectable so tests exercise the retry
+    /// path without paying real wall-clock delays.
+    /// </param>
+    public VerifiedFileDownloader(
+        IOpenClawLogger logger,
+        Func<HttpClient>? httpClientFactory = null,
+        Func<int, TimeSpan>? retryDelay = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory ?? CreateDefaultClient;
+        _retryDelay = retryDelay ?? DefaultRetryDelay;
     }
+
+    private static TimeSpan DefaultRetryDelay(int attempt) =>
+        TimeSpan.FromSeconds(Math.Min(30, 2 * attempt));
 
     private static HttpClient CreateDefaultClient() =>
         // Large weights over a slow link legitimately take hours. The timeout
@@ -116,10 +134,10 @@ public sealed class VerifiedFileDownloader
 
         var partPath = request.DestinationPath + ".part";
 
+        await FetchWithRetryAsync(request, partPath, bytesCompleted, cancellationToken).ConfigureAwait(false);
+
         try
         {
-            await FetchToPartFileAsync(request, partPath, bytesCompleted, cancellationToken).ConfigureAwait(false);
-
             if (request.ExpectedSizeBytes > 0)
             {
                 var actualSize = new FileInfo(partPath).Length;
@@ -138,13 +156,75 @@ public sealed class VerifiedFileDownloader
         }
         catch
         {
-            // Any failure discards the partial file. Keeping a mismatched or
-            // truncated .part would make the next resume attempt repeat the same
-            // failure forever.
+            // A verification failure means the bytes on disk are known bad, so the
+            // partial file is discarded. Keeping it would make every later resume
+            // attempt repeat the same failure forever.
+            //
+            // Note this is deliberately narrower than "any failure": a dropped
+            // connection is handled in FetchWithRetryAsync, which keeps the
+            // partial file precisely so the transfer can resume.
             TryDelete(partPath);
             throw;
         }
     }
+
+    /// <summary>
+    /// Run the transfer, retrying a dropped connection with a resumed range
+    /// request.
+    /// </summary>
+    /// <remarks>
+    /// A multi-gigabyte transfer over tens of minutes will meet a transient
+    /// network failure sooner or later; a real 21 GB run died at 50% on a socket
+    /// read. Failing the whole download there, or worse deleting the partial
+    /// file, throws away everything already fetched. Transport errors therefore
+    /// keep the partial file and retry from where it stopped, while cancellation
+    /// keeps the file but stops immediately so the user can resume later.
+    /// </remarks>
+    private async Task FetchWithRetryAsync(
+        VerifiedDownloadRequest request,
+        string partPath,
+        IProgress<long>? bytesCompleted,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await FetchToPartFileAsync(request, partPath, bytesCompleted, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The user asked to stop. Leave the partial file so a later call
+                // can resume instead of starting over.
+                throw;
+            }
+            catch (Exception ex) when (IsTransientTransportFailure(ex) && attempt < MaxTransportAttempts)
+            {
+                var delay = _retryDelay(attempt);
+                _logger.Warn(
+                    $"[Inference] Transfer of '{request.Label}' failed on attempt {attempt} " +
+                    $"({ex.GetType().Name}); retrying in {delay.TotalSeconds:F0}s");
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True for failures that are worth retrying with a resumed range request:
+    /// the connection dropped or the server hiccuped, rather than the content
+    /// being wrong.
+    /// </summary>
+    private static bool IsTransientTransportFailure(Exception ex) => ex switch
+    {
+        HttpRequestException => true,
+        System.Net.Sockets.SocketException => true,
+        // Surfaces as an inner exception of an IOException on a mid-body drop,
+        // and directly when HttpClient times out an idle read.
+        IOException => true,
+        TaskCanceledException => true,
+        _ => ex.InnerException is not null && IsTransientTransportFailure(ex.InnerException),
+    };
 
     private async Task FetchToPartFileAsync(
         VerifiedDownloadRequest request,

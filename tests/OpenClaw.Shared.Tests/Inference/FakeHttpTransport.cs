@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -74,7 +75,73 @@ internal sealed class FakeHttpTransport : HttpMessageHandler
         if (entry.TruncateAfterBytes is { } limit && body.Length > limit)
             body = body[..limit];
 
+        // Simulate a connection that drops partway through the body, which is how
+        // a long real transfer actually fails.
+        if (entry.DropAfterBytes is { } dropAfter && _dropsRemaining > 0)
+        {
+            _dropsRemaining--;
+            var delivered = Math.Min(dropAfter, body.Length);
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StreamContent(new DroppingStream(body[..delivered])),
+            });
+        }
+
         return Task.FromResult(new HttpResponseMessage(status) { Content = new ByteArrayContent(body) });
+    }
+
+    /// <summary>
+    /// Make the next <paramref name="times"/> responses for <paramref name="url"/>
+    /// deliver <paramref name="afterBytes"/> bytes and then fail the stream, the
+    /// way a dropped TCP connection does mid-transfer.
+    /// </summary>
+    public void DropConnectionAfter(string url, int afterBytes, int times = 1)
+    {
+        _entries[url] = _entries[url] with { DropAfterBytes = afterBytes };
+        _dropsRemaining = times;
+    }
+
+    private int _dropsRemaining;
+
+    /// <summary>Yields its buffer, then throws as a broken connection would.</summary>
+    private sealed class DroppingStream(byte[] payload) : Stream
+    {
+        private int _position;
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_position >= payload.Length)
+                throw new IOException("The connection was closed unexpectedly.");
+
+            var n = Math.Min(count, payload.Length - _position);
+            Array.Copy(payload, _position, buffer, offset, n);
+            _position += n;
+            return n;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (_position >= payload.Length)
+                throw new IOException("The connection was closed unexpectedly.");
+
+            var n = Math.Min(buffer.Length, payload.Length - _position);
+            payload.AsSpan(_position, n).CopyTo(buffer);
+            _position += n;
+            return n;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(Read(buffer.Span));
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => payload.Length;
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     /// <summary>Factory to hand to the downloader under test.</summary>
@@ -91,5 +158,5 @@ internal sealed class FakeHttpTransport : HttpMessageHandler
     public static string Sha256Of(byte[] body) =>
         Convert.ToHexString(SHA256.HashData(body)).ToLowerInvariant();
 
-    private sealed record Entry(byte[] Body, bool SupportsRange, int? TruncateAfterBytes);
+    private sealed record Entry(byte[] Body, bool SupportsRange, int? TruncateAfterBytes, int? DropAfterBytes = null);
 }

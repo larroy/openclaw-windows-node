@@ -8,7 +8,7 @@ inline; update it as phases land.
 | 1 | Hardware probe, backend selection, model recommender | Landed |
 | 2 | Runtime and GGUF download managers | Landed |
 | 3 | Server process and settings UI | Landed |
-| 4 | Gateway provider registration | Not started (blocked on live schema) |
+| 4 | Gateway provider registration | Not started |
 | 5 | Optional `localinference.status` node capability | Not started |
 
 ## Context
@@ -232,7 +232,7 @@ remains the crash backstop, not a substitute for an orderly stop. Strings are
 seeded English-only across all five locales using the repo's
 deferred-translation pattern and registered in `LocalizationValidationTests`.
 
-## Phase 4: gateway registration (blocked on live schema)
+## Phase 4: gateway registration
 
 Once the server is healthy, patch the gateway config to add an
 OpenAI-compatible provider pointing at it, via
@@ -246,12 +246,78 @@ route the user to the Config page. Silently clobbering real API keys with
 redaction placeholders while enabling local inference would be a severe
 regression.
 
-**Blocker.** This repo does not contain the gateway's config schema;
-`ConfigPage` fetches it at runtime from `config.get`. The dot-path and shape for
-registering an OpenAI-compatible provider is therefore not verifiable from this
-checkout. First step of this phase: connect to a real gateway, inspect the
-schema the Config page renders, and write the builder against the real shape. Do
-not guess it.
+**Schema, confirmed against the gateway source (`../openclaw`).** This repo
+does not vendor the gateway's config schema, but it lives in the gateway
+checkout and is no longer a guess:
+
+- `src/config/zod-schema.core.ts` defines `ModelProviderSchema` (the shape of
+  one entry under `models.providers.<providerId>`) and `ModelProvidersSchema`
+  (the `Record<providerId, ModelProviderSchema>` map), plus a `superRefine`
+  that requires `baseUrl` and a non-empty `models[]` array for any provider id
+  outside `BUILT_IN_MODEL_PROVIDER_OVERLAY_IDS` (`openai`, `ollama`,
+  `lmstudio`, `vllm`, etc.). Our registered id will not be a built-in, so both
+  fields are mandatory.
+- `docs/gateway/local-models.md` and `docs/gateway/local-model-services.md` in
+  the gateway repo document this exact scenario (a local OpenAI-compatible
+  server such as llama-server) with worked examples.
+
+Patch target is `models.providers.<providerId>`, merged (`mode: "merge"`) via
+`config.patch`:
+
+```json5
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "llama-local": {
+        "baseUrl": "http://127.0.0.1:8080/v1",
+        "apiKey": "sk-local",
+        "api": "openai-completions",
+        "timeoutSeconds": 300,
+        "models": [
+          {
+            "id": "my-local-model",
+            "name": "My Local Model",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 32768,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Notes for the builder:
+
+- `api: "openai-completions"` is the right value for a plain
+  OpenAI-compatible `/v1/chat/completions` server like llama-server; it is
+  also the default when `api` is omitted on a custom provider with a
+  `baseUrl`.
+- `apiKey` accepts any non-empty string for a loopback/LAN `baseUrl`; there is
+  no real secret to protect for a local server, but the field is still
+  registered as sensitive (`SecretInputSchema.optional().register(sensitive)`),
+  so it round-trips through `config.get` as the sentinel
+  `__OPENCLAW_REDACTED__`. This confirms the redaction-sentinel safety rail
+  already planned above: resending the config unchanged is safe because
+  `restoreRedactedValues(...)` on the gateway swaps the sentinel back before
+  merge/validate, but our own outgoing patch must not write a sentinel into a
+  field it did not read one from.
+- `models[].id` is provider-local; a model is addressed elsewhere in config
+  (e.g. `agents.defaults.model.primary`) as `<providerId>/<modelId>`. The
+  provider id and the model id here should be generated deterministically from
+  our runtime/model identity so re-registration is idempotent.
+- `config.patch` requires a `baseHash` from a prior `config.get` (compare-and-
+  swap), matching `PatchConfigDetailedAsync(fullConfig, baseHash)`.
+- Optional and not required for the first cut: `localService` (`command`,
+  `args`, `healthUrl`, `readyTimeoutMs`, `idleStopMs`) lets the gateway itself
+  spawn and health-check a local server. We already own process lifecycle via
+  `LlamaServerProcess`, so registration should populate `baseUrl` +
+  `models[]` only and leave `localService` unset, to avoid a double process
+  owner.
 
 **WSL reachability.** When the gateway runs in WSL, `127.0.0.1` inside the
 distro is not the Windows host. `WINDOWS_NODE_ARCHITECTURE.md` records this:
@@ -320,6 +386,36 @@ Real behavior proof, which CI cannot establish:
    picker and that a turn reaches the local server.
 7. Cover both mirrored and NAT WSL networking, or record which was not covered.
 
-Not verifiable in the current environment and explicitly deferred: the gateway
-provider config schema, the Vulkan and arm64 CUDA paths, and the DeepSeek path.
-State these as blockers in the PR rather than implying coverage.
+### Real-behavior proof captured 2026-08-19
+
+Run on the development host (GB10 DGX Spark: ARM64 Windows, RTX Spark N1X,
+24512 MiB VRAM, driver 616.29):
+
+| Step | Result |
+| --- | --- |
+| Hardware probe | `Arm64`, CUDA 13, 25,702,694,912 bytes VRAM, one GPU (NPU correctly excluded) |
+| Backend selected | `b10472-cuda13-arm64`, both llama.cpp and cudart archives |
+| Runtime install | 293 MB downloaded, both SHA-256 verified, 43 files extracted, 15 s |
+| `llama-server --version` | `version: 0.1.1-dev (build 10472, commit 60eeeb608)` |
+| Model download | Qwen3.6-35B-A3B UD-Q4_K_M, 22,663,387,424 bytes, SHA-256 verified, 11.9 min at 35 MB/s |
+| Server start | Ready in 78 s |
+| Completion | `POST /v1/chat/completions` returned HTTP 200 in 4.0 s; "What is 2+2?" answered `4` |
+| Speculative decoding | `--spec-type draft-mtp` active: draft acceptance 0.88 (45/51), mean length 3.65 |
+| Throughput | 40.4 tokens/second eval |
+| Stop | `Starting -> Ready -> Stopped`, no spurious failure |
+| Idempotence | A second run skipped both downloads and started in 78 s |
+
+Two defects were found only by this run and are fixed: the downloader deleted
+the partial file on a dropped connection (losing 10.6 GB of good bytes), and a
+deliberate stop was reported as an unexpected crash.
+
+Still not covered: the Vulkan and x64 CUDA paths (need that hardware), the
+DeepSeek path (needs ~160 GB), and gateway registration (Phase 4).
+
+Not verifiable in the current environment and explicitly deferred: exercising
+the registration patch against a real running gateway (the schema itself is
+now confirmed from the gateway source, see Phase 4, but end-to-end proof
+still needs a live instance), the Vulkan and x64 CUDA paths, and the
+DeepSeek path. The arm64 CUDA path is no longer deferred: it is the one proven
+end to end above. State the rest as blockers in the PR rather than implying
+coverage.
