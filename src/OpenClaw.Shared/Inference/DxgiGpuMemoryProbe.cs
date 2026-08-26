@@ -86,11 +86,21 @@ internal static class DxgiGpuMemoryProbe
 
         long? sharedMemoryBytes = ToInt64(description.SharedSystemMemory);
         long? freeSharedMemoryBytes = QueryFreeSharedMemory(adapter);
+
+        // NVML packs PCI identity as (deviceId << 16) | vendorId. Carry the same
+        // shape so the two probes can be joined on adapter identity rather than on
+        // a display name, which the two APIs do not always agree on.
+        uint pciDeviceId = (description.DeviceId << 16) | (description.VendorId & 0xFFFF);
+
         AddMemoryByName(
             results,
             ambiguousNames,
             description.Description,
-            new DxgiGpuMemoryInfo(sharedMemoryBytes, freeSharedMemoryBytes));
+            new DxgiGpuMemoryInfo(
+                sharedMemoryBytes,
+                freeSharedMemoryBytes,
+                pciDeviceId,
+                description.SubSystemId));
     }
 
     internal static void AddMemoryByName(
@@ -209,4 +219,6 @@ internal static class DxgiGpuMemoryProbe
 
 internal sealed record DxgiGpuMemoryInfo(
     long? SharedMemoryBytes,
-    long? FreeSharedMemoryBytes);
+    long? FreeSharedMemoryBytes,
+    uint? PciDeviceId = null,
+    uint? PciSubSystemId = null);

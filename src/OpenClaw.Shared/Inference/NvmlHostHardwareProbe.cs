@@ -88,7 +88,14 @@ public sealed class NvmlHostHardwareProbe : IHostHardwareProbe
             {
                 string name = device.Name.Trim();
                 string normalizedName = NormalizeGpuName(name);
-                DxgiGpuMemoryInfo? dxgiMemory = nvmlNameCounts[normalizedName] == 1
+
+                // Prefer PCI identity. NVML and DXGI can report different display
+                // names for the same adapter, and on a unified-memory part that costs
+                // the entire shared pool: the adapter looks like a small dedicated
+                // card instead. Fall back to the name match when either side cannot
+                // supply identity.
+                DxgiGpuMemoryInfo? dxgiMemory = FindDxgiMemoryByPciIdentity(dxgiMemoryByName, device);
+                dxgiMemory ??= nvmlNameCounts[normalizedName] == 1
                     ? FindDxgiMemoryByName(dxgiMemoryByName, name)
                     : null;
                 return new GpuInfo(
@@ -114,6 +121,27 @@ public sealed class NvmlHostHardwareProbe : IHostHardwareProbe
 
     private static string NormalizeGpuName(string value) =>
         string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
+    /// Match an NVML device to a DXGI adapter on PCI identity. Returns null unless
+    /// exactly one adapter matches, so an ambiguous set never attributes another
+    /// adapter's shared memory to this device.
+    /// </summary>
+    private static DxgiGpuMemoryInfo? FindDxgiMemoryByPciIdentity(
+        IReadOnlyDictionary<string, DxgiGpuMemoryInfo> dxgiMemoryByName,
+        NvmlGpuSnapshot device)
+    {
+        if (device.PciDeviceId is not { } pciDeviceId)
+            return null;
+
+        DxgiGpuMemoryInfo[] matches = dxgiMemoryByName.Values
+            .Where(entry =>
+                entry.PciDeviceId == pciDeviceId &&
+                entry.PciSubSystemId == device.PciSubSystemId)
+            .ToArray();
+
+        return matches.Length == 1 ? matches[0] : null;
+    }
 
     private static DxgiGpuMemoryInfo? FindDxgiMemoryByName(
         IReadOnlyDictionary<string, DxgiGpuMemoryInfo> dxgiMemoryByName,
@@ -181,6 +209,18 @@ public sealed class NvmlHostHardwareProbe : IHostHardwareProbe
             var getDriver = GetDelegate<NvmlSystemGetString>(library, "nvmlSystemGetDriverVersion");
             var getCuda = GetDelegate<NvmlSystemGetCudaDriverVersion>(library, "nvmlSystemGetCudaDriverVersion_v2");
 
+            // Older NVML builds may not export this. It is optional: without it the
+            // join falls back to matching on adapter name as before.
+            NvmlDeviceGetPciInfo? getPciInfo = null;
+            try
+            {
+                getPciInfo = GetDelegate<NvmlDeviceGetPciInfo>(library, "nvmlDeviceGetPciInfo_v3");
+            }
+            catch (EntryPointNotFoundException)
+            {
+                getPciInfo = null;
+            }
+
             if (initialize() != NvmlSuccess)
                 return NvmlProbeResult.Empty;
             initialized = true;
@@ -207,7 +247,27 @@ public sealed class NvmlHostHardwareProbe : IHostHardwareProbe
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
                 string? uuid = ReadDeviceString(device, getUuid, DeviceUuidCapacity);
-                devices.Add(new NvmlGpuSnapshot(name, uuid, memory.Total, memory.Free));
+
+                // PCI identity is optional. It is the join key against DXGI, which
+                // reports the same vendor, device, and subsystem ids for the adapter
+                // but can report a different display name for it.
+                uint? pciDeviceId = null;
+                uint? pciSubSystemId = null;
+                if (getPciInfo is not null &&
+                    getPciInfo(device, out NvmlPciInfo pciInfo) == NvmlSuccess &&
+                    pciInfo.PciDeviceId != 0)
+                {
+                    pciDeviceId = pciInfo.PciDeviceId;
+                    pciSubSystemId = pciInfo.PciSubSystemId;
+                }
+
+                devices.Add(new NvmlGpuSnapshot(
+                    name,
+                    uuid,
+                    memory.Total,
+                    memory.Free,
+                    pciDeviceId,
+                    pciSubSystemId));
             }
 
             return new NvmlProbeResult(devices, driverVersion, cudaMajorVersion);
@@ -311,13 +371,39 @@ public sealed class NvmlHostHardwareProbe : IHostHardwareProbe
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NvmlDeviceGetMemoryInfo(IntPtr device, out NvmlMemory memory);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NvmlDeviceGetPciInfo(IntPtr device, out NvmlPciInfo pciInfo);
+
+    /// <summary>
+    /// nvmlPciInfo_v3_t. Only the PCI identity fields are consumed; the bus id
+    /// buffers are declared so the struct layout matches what NVML writes.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    private struct NvmlPciInfo
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public byte[] BusIdLegacy;
+        public uint Domain;
+        public uint Bus;
+        public uint Device;
+
+        /// <summary>Packed as (deviceId &lt;&lt; 16) | vendorId.</summary>
+        public uint PciDeviceId;
+        public uint PciSubSystemId;
+
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public byte[] BusId;
+    }
 }
 
 internal sealed record NvmlGpuSnapshot(
     string Name,
     string? Uuid,
     ulong TotalMemoryBytes,
-    ulong FreeMemoryBytes);
+    ulong FreeMemoryBytes,
+    uint? PciDeviceId = null,
+    uint? PciSubSystemId = null);
 
 internal sealed record NvmlProbeResult(
     IReadOnlyList<NvmlGpuSnapshot> Devices,
