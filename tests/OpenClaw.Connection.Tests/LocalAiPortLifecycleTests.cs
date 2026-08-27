@@ -340,46 +340,44 @@ public sealed class LocalAiPortLifecycleTests
         return arguments[index + 1];
     }
 
-    private static LocalAiInstallManifest ValidManifest() => new()
+    private static LocalAiInstallManifest ValidManifest()
     {
-        EngineVersion = "b10488",
-        Architecture = "arm64",
-        RuntimeId = "b10488-cuda13-arm64",
-        ModelCatalogId = "qwen3.6-35b-a3b-mtp-q4-k-m",
-        SelectedGpuId = "GPU-01234567-89ab-cdef-0123-456789abcdef",
-        ExecutablePath = Path.Combine("engines", "llama-b10488", "llama-server.exe"),
-        RuntimeAssets =
-        [
-            new LocalAiAssetReceipt
-            {
-                FileName = "llama-b10488-bin-win-cuda-13.4-arm64.zip",
-                SourceUrl = "https://github.com/ggml-org/llama.cpp/releases/download/b10488/llama-b10488-bin-win-cuda-13.4-arm64.zip",
-                SizeBytes = 140_379_054,
-                Sha256 = "75554d62f4af8f4150d3b4b0cca7df62d44105e98fb7cd92ab2d177e382b441d",
-            },
-            new LocalAiAssetReceipt
-            {
-                FileName = "cudart-llama-bin-win-cuda-13.4-arm64.zip",
-                SourceUrl = "https://github.com/ggml-org/llama.cpp/releases/download/b10488/cudart-llama-bin-win-cuda-13.4-arm64.zip",
-                SizeBytes = 153_318_797,
-                Sha256 = "5a40dc7c5fa3d0a80ceeba4f16f9e8d25d87bcf1399c9233588953c43436c33c",
-            },
-        ],
-        ModelPath = Path.Combine("models", "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"),
-        ModelId = "unsloth/Qwen3.6-35B-A3B-MTP-GGUF@5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
-        ModelAlias = "qwen3.6-35b-a3b-mtp-q4-k-m",
-        ModelAsset = new LocalAiAssetReceipt
+        LlamaRuntimeVariant runtime = LlamaRuntimeCatalog.Find(
+            System.Runtime.InteropServices.Architecture.Arm64)!;
+        return new LocalAiInstallManifest
         {
-            FileName = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
-            SourceUrl = "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/resolve/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf?download=true",
-            SizeBytes = 22_663_387_424,
-            Sha256 = "0b21525e972670ed59e1812e170b27c26355381f0656ecc4e25617ece7dac58b",
-        },
-        RequestedPort = 0,
-        Endpoint = null,
-        ContextLength = 262_144,
-        InstalledAtUtc = DateTimeOffset.Parse("2026-08-18T12:00:00Z"),
-    };
+            EngineVersion = LlamaRuntimeCatalog.ReleaseTag,
+            Architecture = "arm64",
+            RuntimeId = runtime.Id,
+            ModelCatalogId = "qwen3.6-35b-a3b-mtp-q4-k-m",
+            SelectedGpuId = "GPU-01234567-89ab-cdef-0123-456789abcdef",
+            ExecutablePath = Path.Combine(
+                "engines",
+                $"llama-{LlamaRuntimeCatalog.ReleaseTag}",
+                LlamaRuntimeCatalog.ServerExecutableName),
+            RuntimeAssets = runtime.Artifacts.Select(artifact => new LocalAiAssetReceipt
+            {
+                FileName = Path.GetFileName(artifact.RelativePath),
+                SourceUrl = artifact.DownloadUri.AbsoluteUri,
+                SizeBytes = artifact.SizeBytes,
+                Sha256 = artifact.Sha256.Value,
+            }).ToImmutableArray(),
+            ModelPath = Path.Combine("models", "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"),
+            ModelId = "unsloth/Qwen3.6-35B-A3B-MTP-GGUF@5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",
+            ModelAlias = "qwen3.6-35b-a3b-mtp-q4-k-m",
+            ModelAsset = new LocalAiAssetReceipt
+            {
+                FileName = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+                SourceUrl = "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/resolve/5bc3e238d916f48a861bac2f8a1990a0e9b7e98d/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf?download=true",
+                SizeBytes = 22_663_387_424,
+                Sha256 = "0b21525e972670ed59e1812e170b27c26355381f0656ecc4e25617ece7dac58b",
+            },
+            RequestedPort = 0,
+            Endpoint = null,
+            ContextLength = 262_144,
+            InstalledAtUtc = DateTimeOffset.Parse("2026-08-18T12:00:00Z"),
+        };
+    }
 
     private sealed class FakePlatform : ILlamaServerRuntimePlatform
     {
