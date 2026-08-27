@@ -19,20 +19,24 @@ public class SetupPipelineTests
         private readonly Func<SetupContext, CancellationToken, Task<StepResult>> _execute;
         private readonly Func<SetupContext, CancellationToken, Task>? _rollback;
         private readonly bool _canSkip;
+        private readonly bool _rollsBackPrecedingSteps;
 
         public override string Id { get; }
         public override string DisplayName { get; }
         public override bool CanRetry => false;
+        public override bool RollsBackPrecedingStepsOnFailure => _rollsBackPrecedingSteps;
 
         public MockStep(string id, Func<SetupContext, CancellationToken, Task<StepResult>> execute,
             Func<SetupContext, CancellationToken, Task>? rollback = null,
-            bool canSkip = false)
+            bool canSkip = false,
+            bool rollsBackPrecedingSteps = true)
         {
             Id = id;
             DisplayName = id;
             _execute = execute;
             _rollback = rollback;
             _canSkip = canSkip;
+            _rollsBackPrecedingSteps = rollsBackPrecedingSteps;
         }
 
         public override bool CanSkip(SetupContext ctx) => _canSkip;
@@ -233,6 +237,60 @@ public class SetupPipelineTests
         var result = await pipeline.RunAsync(ctx);
         Assert.Equal(PipelineOutcome.Failed, result.Outcome);
         Assert.Equal(["s2", "s1"], rollbackOrder);
+    }
+
+    [Fact]
+    public async Task RunAsync_StepFails_WithRollback_DefaultStillRollsBackPrecedingSteps()
+    {
+        // Regression guard: a step that does not override RollsBackPrecedingStepsOnFailure
+        // preserves today's behavior of rolling back everything completed before it.
+        var rollbackOrder = new List<string>();
+        var config = new SetupConfig { RollbackOnFailure = true };
+        var ctx = CreateContext(config);
+
+        var pipeline = new SetupPipeline([
+            new MockStep("s1",
+                (_, _) => Task.FromResult(StepResult.Ok()),
+                (_, _) => { rollbackOrder.Add("s1"); return Task.CompletedTask; }),
+            new MockStep("s2",
+                (_, _) => Task.FromResult(StepResult.Fail("fail"))),
+        ]);
+
+        var result = await pipeline.RunAsync(ctx);
+
+        Assert.Equal(PipelineOutcome.Failed, result.Outcome);
+        Assert.Equal(["s1"], rollbackOrder);
+    }
+
+    [Fact]
+    public async Task RunAsync_StepFails_WithRollback_PreservesPrecedingStepsWhenStepOptsOut()
+    {
+        // A verification-style step (e.g. VerifyLocalAiGpuLoadStep) opting out of
+        // RollsBackPrecedingStepsOnFailure must not trigger rollback of the
+        // expensive artifacts acquired by steps before it.
+        var rollbackOrder = new List<string>();
+        var failedStepRolledBack = false;
+        var config = new SetupConfig { RollbackOnFailure = true };
+        var ctx = CreateContext(config);
+
+        var pipeline = new SetupPipeline([
+            new MockStep("s1",
+                (_, _) => Task.FromResult(StepResult.Ok()),
+                (_, _) => { rollbackOrder.Add("s1"); return Task.CompletedTask; }),
+            new MockStep("s2",
+                (_, _) => Task.FromResult(StepResult.Ok()),
+                (_, _) => { rollbackOrder.Add("s2"); return Task.CompletedTask; }),
+            new MockStep("s3",
+                (_, _) => Task.FromResult(StepResult.Fail("verification failed")),
+                (_, _) => { failedStepRolledBack = true; return Task.CompletedTask; },
+                rollsBackPrecedingSteps: false),
+        ]);
+
+        var result = await pipeline.RunAsync(ctx);
+
+        Assert.Equal(PipelineOutcome.Failed, result.Outcome);
+        Assert.Empty(rollbackOrder);
+        Assert.True(failedStepRolledBack, "the failed step itself is still rolled back");
     }
 
     [Fact]

@@ -15,6 +15,17 @@ public abstract class SetupStep
     public virtual bool CanSkip(SetupContext ctx) => false;
     public virtual bool CanRetry => true;
     public virtual RetryPolicy Retry => RetryPolicy.Default;
+
+    /// <summary>
+    /// Whether this step's failure should roll back previously-completed steps.
+    /// Read-only verification steps that fail after expensive prior acquisition
+    /// (model/runtime download, manifest persistence) should return false so a
+    /// failed verification doesn't force those artifacts to be re-downloaded —
+    /// they remain in place, reusable by a retry via each step's own
+    /// CreatedThisRun-gated skip/reuse logic. The failed step itself is still
+    /// rolled back regardless of this flag.
+    /// </summary>
+    public virtual bool RollsBackPrecedingStepsOnFailure => true;
 }
 
 // ─── Pipeline Result ───
@@ -212,7 +223,16 @@ public sealed class SetupPipeline
             if (_rollbackOnFailureOverride ?? ctx.Config.RollbackOnFailure)
             {
                 await RollbackFailedStep(step, ctx);
-                await RollbackCompletedSteps(ctx);
+                if (step.RollsBackPrecedingStepsOnFailure)
+                {
+                    await RollbackCompletedSteps(ctx);
+                }
+                else
+                {
+                    ctx.Logger.Warn(
+                        $"Preserving {_completedSteps.Count} completed step(s); " +
+                        $"'{step.Id}' does not roll back preceding work.");
+                }
             }
 
             ctx.Journal.RecordPipelineEvent("pipeline_failed", $"step={step.Id}, message={result.Message}");

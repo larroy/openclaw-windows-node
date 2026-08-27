@@ -758,6 +758,10 @@ public sealed class VerifyLocalAiInferenceStep : SetupStep
     public override bool CanRetry => false;
     public override RetryPolicy Retry => RetryPolicy.None;
 
+    // Read-only verification downstream of expensive model/runtime acquisition.
+    // A failure here shouldn't force those artifacts to be re-downloaded.
+    public override bool RollsBackPrecedingStepsOnFailure => false;
+
     public override bool CanSkip(SetupContext ctx) => !ctx.Config.LocalAi.Enabled;
 
     public override async Task<StepResult> ExecuteAsync(SetupContext ctx, CancellationToken ct)

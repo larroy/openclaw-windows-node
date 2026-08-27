@@ -91,4 +91,24 @@ public class LocalAiGpuVerificationTests
 
         Assert.False(accepted);
     }
+
+    [Fact]
+    public void RollsBackPrecedingStepsOnFailure_IsFalse()
+    {
+        // A failed GPU-load verification must not force the pipeline to roll
+        // back (delete) the already-downloaded model/runtime it just verified.
+        SetupStep step = new VerifyLocalAiGpuLoadStep();
+
+        Assert.False(step.RollsBackPrecedingStepsOnFailure);
+    }
+
+    [Fact]
+    public void VerifyLocalAiInferenceStep_RollsBackPrecedingStepsOnFailure_IsFalse()
+    {
+        // Same reasoning as VerifyLocalAiGpuLoadStep: a failed on-demand-load
+        // verification must not force re-acquisition of the model/runtime.
+        SetupStep step = new VerifyLocalAiInferenceStep();
+
+        Assert.False(step.RollsBackPrecedingStepsOnFailure);
+    }
 }
