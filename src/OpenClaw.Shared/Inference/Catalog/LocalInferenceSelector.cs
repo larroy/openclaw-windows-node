@@ -141,27 +141,22 @@ internal static class LocalInferenceQualificationPolicy
         return SaturatingMultiply(bytesPerToken, recipe.ContextTokens);
     }
 
+    /// <summary>
+    /// CUDA-allocatable capacity is NVML dedicated memory only. DXGI-reported
+    /// shared memory is a WDDM host-RAM budget the GPU may borrow for graphics
+    /// use; it does not back CUDA device allocations, so it must not be counted
+    /// as usable capacity for model-fit decisions.
+    /// </summary>
     public static long GetEffectiveTotalMemoryBytes(GpuInfo gpu) =>
-        gpu.GpuVisibleMemoryBytes is not > 0
-            ? 0
-            : SaturatingAdd(
-                gpu.GpuVisibleMemoryBytes.Value,
-                gpu.SharedGpuMemoryBytes is > 0 ? gpu.SharedGpuMemoryBytes.Value : 0);
+        gpu.GpuVisibleMemoryBytes is > 0 ? gpu.GpuVisibleMemoryBytes.Value : 0;
 
-    public static long? GetEffectiveFreeMemoryBytes(GpuInfo gpu)
-    {
-        if (gpu.FreeGpuVisibleMemoryBytes is not >= 0)
-            return null;
-
-        if (gpu.SharedGpuMemoryBytes is > 0 && gpu.FreeSharedGpuMemoryBytes is null)
-            return null;
-
-        return SaturatingAdd(
-            gpu.FreeGpuVisibleMemoryBytes.Value,
-            gpu.SharedGpuMemoryBytes is > 0 && gpu.FreeSharedGpuMemoryBytes is > 0
-                ? gpu.FreeSharedGpuMemoryBytes.Value
-                : 0);
-    }
+    /// <summary>
+    /// Free CUDA-allocatable memory is NVML dedicated free memory only, for the
+    /// same reason as <see cref="GetEffectiveTotalMemoryBytes"/> — DXGI shared
+    /// memory is excluded rather than added in.
+    /// </summary>
+    public static long? GetEffectiveFreeMemoryBytes(GpuInfo gpu) =>
+        gpu.FreeGpuVisibleMemoryBytes is >= 0 ? gpu.FreeGpuVisibleMemoryBytes.Value : null;
 
     private static bool IsStableGpuId(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&

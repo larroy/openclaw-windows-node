@@ -90,8 +90,11 @@ public class LocalInferenceQualificationTests
     }
 
     [Fact]
-    public void Evaluate_CountsSharedMemoryForAnyNvidiaGpuAndUnknownSharedFreeIsNotBusy()
+    public void Evaluate_ExcludesSharedMemoryFromCudaAllocatableCapacity()
     {
+        // DXGI shared memory is a WDDM host-RAM budget the GPU may borrow for
+        // graphics use; it does not back CUDA device allocations, so it must
+        // not inflate the capacity used for model-fit decisions.
         GpuInfo gpu = Gpu("NVIDIA generic unified memory", "GPU-shared", 8, 8) with
         {
             SharedGpuMemoryBytes = 16 * GiB,
@@ -99,12 +102,44 @@ public class LocalInferenceQualificationTests
         };
 
         LocalInferenceEligibilityResult result = LocalInferenceEligibility.Evaluate(
-            Hardware(RuntimeArchitecture.Arm64, gpu));
+            Hardware(RuntimeArchitecture.Arm64, gpu),
+            LocalModelCatalog.Qwen9BModelId);
 
-        Assert.Equal(LocalInferenceEligibilityStatus.Eligible, result.Status);
-        Assert.Equal(LocalModelCatalog.Qwen9BModelId, result.Plan?.Model.Id);
-        Assert.Equal(24 * GiB, result.DetectedTotalMemoryBytes);
-        Assert.Null(result.AvailableFreeMemoryBytes);
+        // 8 GiB dedicated alone is below the smallest catalog model's ~21.5 GiB
+        // requirement. If shared memory were wrongly counted, 8 + 16 = 24 GiB
+        // would appear sufficient and this would report Eligible.
+        Assert.Equal(LocalInferenceEligibilityStatus.Unsupported, result.Status);
+        Assert.Equal(LocalInferenceEligibilityFailureCode.InsufficientGpuMemory, result.FailureCode);
+        Assert.Equal(8 * GiB, result.DetectedTotalMemoryBytes);
+    }
+
+    [Fact]
+    public void GetEffectiveTotalMemoryBytes_IgnoresSharedMemory()
+    {
+        GpuInfo gpu = Gpu("NVIDIA generic unified memory", "GPU-shared", 8, 8) with
+        {
+            SharedGpuMemoryBytes = 16 * GiB,
+            FreeSharedGpuMemoryBytes = 12 * GiB,
+        };
+
+        Assert.Equal(8 * GiB, LocalInferenceQualificationPolicy.GetEffectiveTotalMemoryBytes(gpu));
+    }
+
+    [Fact]
+    public void GetEffectiveFreeMemoryBytes_IgnoresSharedMemory()
+    {
+        GpuInfo gpuWithKnownSharedFree = Gpu("NVIDIA generic unified memory", "GPU-shared", 8, 6) with
+        {
+            SharedGpuMemoryBytes = 16 * GiB,
+            FreeSharedGpuMemoryBytes = 12 * GiB,
+        };
+        GpuInfo gpuWithUnknownSharedFree = gpuWithKnownSharedFree with { FreeSharedGpuMemoryBytes = null };
+
+        // Previously, a known shared-free value would be added in, and an
+        // unknown one would poison the whole result to null. Now shared memory
+        // never participates, so both report the same dedicated-only free value.
+        Assert.Equal(6 * GiB, LocalInferenceQualificationPolicy.GetEffectiveFreeMemoryBytes(gpuWithKnownSharedFree));
+        Assert.Equal(6 * GiB, LocalInferenceQualificationPolicy.GetEffectiveFreeMemoryBytes(gpuWithUnknownSharedFree));
     }
 
     [Fact]
@@ -197,6 +232,80 @@ public class LocalInferenceQualificationTests
                 ["NVIDIA Generic GPU"] = new(10 * GiB, null),
                 ["Generic GPU (Device 1)"] = new(12 * GiB, null),
             });
+
+        Assert.Null(gpu.SharedGpuMemoryBytes);
+    }
+
+    [Fact]
+    public void Probe_JoinsDxgiByPciIdentityWhenNamesDiverge()
+    {
+        // Reproduces PR #1237's DGX Spark (GB10) scenario: NVML and DXGI report
+        // different display names for the same physical adapter, so the
+        // name-based join alone would silently drop shared memory. PCI
+        // identity (vendor/device/subsystem, packed identically by both APIs)
+        // still resolves it to a single adapter.
+        const uint pciDeviceId = 0x2F0110DEu;
+        const uint pciSubSystemId = 0x001710DEu;
+
+        var probe = new NvmlHostHardwareProbe(
+            () => new NvmlProbeResult(
+                [
+                    new NvmlGpuSnapshot(
+                        "JMJWOA-Generic-GPU",
+                        "GPU-spark",
+                        16_320UL * 1024 * 1024,
+                        15_000UL * 1024 * 1024,
+                        PciDeviceId: pciDeviceId,
+                        PciSubSystemId: pciSubSystemId),
+                ],
+                "592.96",
+                12),
+            () => null,
+            () => new Dictionary<string, DxgiGpuMemoryInfo>
+            {
+                ["RTX Spark GPU"] = new(
+                    30 * GiB,
+                    28 * GiB,
+                    PciDeviceId: pciDeviceId,
+                    PciSubSystemId: pciSubSystemId),
+            },
+            RuntimeArchitecture.Arm64);
+
+        GpuInfo gpu = Assert.Single(probe.Probe().NvidiaGpus);
+
+        Assert.Equal("JMJWOA-Generic-GPU", gpu.Name);
+        Assert.Equal(30 * GiB, gpu.SharedGpuMemoryBytes);
+        Assert.Equal(28 * GiB, gpu.FreeSharedGpuMemoryBytes);
+    }
+
+    [Fact]
+    public void Probe_DoesNotJoinAmbiguousPciIdentityMatches()
+    {
+        const uint pciDeviceId = 0x2F0110DEu;
+        const uint pciSubSystemId = 0x001710DEu;
+
+        var probe = new NvmlHostHardwareProbe(
+            () => new NvmlProbeResult(
+                [
+                    new NvmlGpuSnapshot(
+                        "JMJWOA-Generic-GPU",
+                        "GPU-spark",
+                        16_320UL * 1024 * 1024,
+                        15_000UL * 1024 * 1024,
+                        PciDeviceId: pciDeviceId,
+                        PciSubSystemId: pciSubSystemId),
+                ],
+                "592.96",
+                12),
+            () => null,
+            () => new Dictionary<string, DxgiGpuMemoryInfo>
+            {
+                ["RTX Spark GPU"] = new(30 * GiB, 28 * GiB, pciDeviceId, pciSubSystemId),
+                ["RTX Spark GPU (Secondary)"] = new(30 * GiB, 28 * GiB, pciDeviceId, pciSubSystemId),
+            },
+            RuntimeArchitecture.Arm64);
+
+        GpuInfo gpu = Assert.Single(probe.Probe().NvidiaGpus);
 
         Assert.Null(gpu.SharedGpuMemoryBytes);
     }
