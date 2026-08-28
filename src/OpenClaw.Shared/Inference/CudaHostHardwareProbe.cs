@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -38,46 +39,59 @@ public sealed class CudaHostHardwareProbe : IHostHardwareProbe
             return [];
         }
 
-        int? cudaMajorVersion = CuDriverGetVersion(out int driverVersion) == CudaSuccess && driverVersion > 0
-            ? driverVersion / 1000
-            : null;
-        var gpus = new List<GpuInfo>();
-        for (int ordinal = 0; ordinal < count; ordinal++)
+        int? cudaMajorVersion =
+            CuDriverGetVersion(out int driverVersion) == CudaSuccess && driverVersion > 0
+                ? driverVersion / 1000
+                : null;
+
+        return Enumerable.Range(0, count)
+            .Select(ordinal => TryCaptureGpu(ordinal, cudaMajorVersion))
+            .Where(gpu => gpu is not null)
+            .Select(gpu => gpu!)
+            .ToList();
+    }
+
+    private static GpuInfo? TryCaptureGpu(int ordinal, int? cudaMajorVersion)
+    {
+        if (CuDeviceGet(out int device, ordinal) != CudaSuccess)
+            return null;
+
+        string? name = ReadDeviceName(device);
+        string? pciBusId = ReadPciBusId(device);
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(pciBusId))
+            return null;
+
+        return WithCudaContext(device, () =>
         {
-            if (CuDeviceGet(out int device, ordinal) != CudaSuccess)
-                continue;
-
-            string? name = ReadDeviceName(device);
-            string? pciBusId = ReadPciBusId(device);
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(pciBusId))
-                continue;
-
-            IntPtr context = IntPtr.Zero;
-            try
+            if (CuMemGetInfo(out nuint freeBytes, out nuint totalBytes) != CudaSuccess ||
+                totalBytes == 0 || totalBytes > long.MaxValue || freeBytes > totalBytes)
             {
-                if (CuCtxCreate(out context, 0, device) != CudaSuccess ||
-                    CuMemGetInfo(out nuint freeBytes, out nuint totalBytes) != CudaSuccess ||
-                    totalBytes == 0 || totalBytes > long.MaxValue || freeBytes > totalBytes)
-                {
-                    continue;
-                }
+                return null;
+            }
 
-                gpus.Add(new GpuInfo(
-                    GpuVendor.Nvidia,
-                    name,
-                    GpuVisibleMemoryBytes: (long)totalBytes,
-                    FreeGpuVisibleMemoryBytes: (long)freeBytes,
-                    CudaMajorVersion: cudaMajorVersion,
-                    StableId: ToCudaVisibleDevicesSelector(pciBusId)));
-            }
-            finally
-            {
-                if (context != IntPtr.Zero)
-                    _ = CuCtxDestroy(context);
-            }
+            return new GpuInfo(
+                GpuVendor.Nvidia,
+                name,
+                GpuVisibleMemoryBytes: (long)totalBytes,
+                FreeGpuVisibleMemoryBytes: (long)freeBytes,
+                CudaMajorVersion: cudaMajorVersion,
+                StableId: ToCudaVisibleDevicesSelector(pciBusId));
+        });
+    }
+
+    private static GpuInfo? WithCudaContext(int device, Func<GpuInfo?> action)
+    {
+        if (CuCtxCreate(out IntPtr context, 0, device) != CudaSuccess)
+            return null;
+
+        try
+        {
+            return action();
         }
-
-        return gpus;
+        finally
+        {
+            _ = CuCtxDestroy(context);
+        }
     }
 
     internal static string ToCudaVisibleDevicesSelector(string pciBusId) => pciBusId;
