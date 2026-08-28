@@ -17,7 +17,7 @@ public sealed class PreflightLocalAiHardwareStep : SetupStep
     private readonly IHostHardwareProbe _hardwareProbe;
 
     public PreflightLocalAiHardwareStep()
-        : this(new NvmlHostHardwareProbe())
+        : this(new CudaHostHardwareProbe())
     {
     }
 

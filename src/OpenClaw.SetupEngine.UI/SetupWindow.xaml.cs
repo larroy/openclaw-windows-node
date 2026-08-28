@@ -207,7 +207,7 @@ public sealed partial class SetupWindow : Window
                 _localAiHardwareProbeTask.IsFaulted ||
                 _localAiHardwareProbeTask.IsCanceled)
             {
-                _localAiHardwareProbeTask = Task.Run(() => new NvmlHostHardwareProbe().Probe());
+                _localAiHardwareProbeTask = Task.Run(() => new CudaHostHardwareProbe().Probe());
             }
 
             return _localAiHardwareProbeTask;

@@ -118,16 +118,6 @@ public static class LocalInferenceEligibility
                 freeMemoryBytes);
         }
 
-        if (!Version.TryParse(gpu.DriverVersion, out Version? driverVersion) ||
-            driverVersion < MinimumNvidiaDriverVersion)
-        {
-            return UnsupportedCandidate(
-                gpu,
-                LocalInferenceEligibilityFailureCode.DriverTooOld,
-                totalMemoryBytes,
-                freeMemoryBytes);
-        }
-
         if (gpu.CudaMajorVersion < runtime.CudaVersion.Major)
         {
             return UnsupportedCandidate(

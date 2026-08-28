@@ -279,7 +279,7 @@ public sealed partial class CapabilitiesPage : Page
         SetupWindow? setupWindow = _setupWindow;
         Task<HostHardwareInfo> hardwareTask = setupWindow is not null
             ? setupWindow.GetLocalAiHardwareAsync(forceRefresh: refreshHardwareProbe)
-            : Task.Run(() => new NvmlHostHardwareProbe().Probe());
+            : Task.Run(() => new CudaHostHardwareProbe().Probe());
 
         string? hardwareReason = null;
         LocalInferenceEligibilityResult? eligibility = null;
