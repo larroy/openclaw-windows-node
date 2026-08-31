@@ -13,6 +13,7 @@ public sealed partial class CompletePage : Page
 {
     private static readonly Regex s_urlRegex = new(@"https?://[^\s)]+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private string? _logPath;
+    private string? _serverLogDirectory;
 
     public CompletePage()
     {
@@ -95,8 +96,42 @@ public sealed partial class CompletePage : Page
                 }
                 else
                     ViewLogLink.Visibility = Visibility.Collapsed;
+
+                // llama-server reports the real cause in its own logs, which live outside the
+                // setup log directory above, so surface both the lines and where to find them.
+                ShowServerDiagnostics(args.Detail);
             }
         }
+    }
+
+    private void ShowServerDiagnostics(LocalAiFailureDetail? detail)
+    {
+        if (detail is null)
+        {
+            ServerDiagnosticsText.Visibility = Visibility.Collapsed;
+            ViewServerLogLink.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (detail.Diagnostics.Count > 0)
+        {
+            ServerDiagnosticsText.Text = string.Join(
+                Environment.NewLine,
+                detail.Diagnostics.Select(line => $"llama-server: {line}"));
+            ServerDiagnosticsText.Visibility = Visibility.Visible;
+        }
+        else
+            ServerDiagnosticsText.Visibility = Visibility.Collapsed;
+
+        _serverLogDirectory = detail.LogDirectory;
+        ViewServerLogLink.Content = $"Open Local AI logs → {detail.LogDirectory}";
+        ToolTipService.SetToolTip(ViewServerLogLink, detail.LogDirectory);
+        ViewServerLogLink.Visibility = Visibility.Visible;
+    }
+
+    private void ViewServerLog_Click(object sender, RoutedEventArgs e)
+    {
+        LogFileLauncher.RevealInExplorer(_serverLogDirectory);
     }
 
     private static Uri? ExtractHelpUrl(string? text)
