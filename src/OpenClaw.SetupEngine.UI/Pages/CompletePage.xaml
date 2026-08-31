@@ -115,12 +115,20 @@
                         <TextBlock x:Name="ErrorText" TextWrapping="Wrap"
                                    FontSize="13" FontFamily="Cascadia Code,Consolas,monospace"
                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <TextBlock x:Name="ServerDiagnosticsText" TextWrapping="Wrap"
+                                   Visibility="Collapsed"
+                                   FontSize="12" FontFamily="Cascadia Code,Consolas,monospace"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <HyperlinkButton x:Name="HelpLink"
                                          Visibility="Collapsed"
                                          Padding="0"
                                          FontSize="13" />
                         <HyperlinkButton x:Name="ViewLogLink" Content="View full log →"
                                          Click="ViewLog_Click" Padding="0"
+                                         FontSize="13" />
+                        <HyperlinkButton x:Name="ViewServerLogLink"
+                                         Visibility="Collapsed"
+                                         Click="ViewServerLog_Click" Padding="0"
                                          FontSize="13" />
                     </StackPanel>
                 </Border>
