@@ -371,7 +371,7 @@ public sealed class LocalAiManifestStore
         if (!string.Equals(Path.GetFileName(executable), "llama-server.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The managed local AI executable must be llama-server.exe.");
 
-        if (!HuggingFaceHubCache.TryValidateManagedPath(
+        if (!HuggingFaceHubCache.TryValidateSnapshotReadPath(
                 HuggingFaceHubCache.ResolveCacheRoot(),
                 manifest.ModelPath,
                 out string model,

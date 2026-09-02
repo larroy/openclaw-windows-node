@@ -186,6 +186,44 @@ public sealed class LocalAiInstallRecoveryTests
     }
 
     [Fact]
+    public async Task ModelInstall_ReusesVerifiedStandardHubSnapshotSymlinkWithoutHttp()
+    {
+        using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        byte[] modelBytes = "verified-model"u8.ToArray();
+        LocalModelInfo model = CreateModel(modelBytes);
+        (string modelPath, _) = ResolveModelPaths(cacheRoot, model);
+        string repositoryDirectory = Directory.GetParent(
+            Directory.GetParent(Path.GetDirectoryName(modelPath)!)!.FullName)!.FullName;
+        string blobsDirectory = Path.Combine(repositoryDirectory, "blobs");
+        string blobPath = Path.Combine(blobsDirectory, model.Weights.Sha256.Value);
+        Directory.CreateDirectory(blobsDirectory);
+        Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        await File.WriteAllBytesAsync(blobPath, modelBytes);
+        if (!TryCreateSymbolicLink(
+                modelPath,
+                Path.GetRelativePath(Path.GetDirectoryName(modelPath)!, blobPath)))
+        {
+            return;
+        }
+
+        using var client = new HttpClient(new DelegateHandler(_ =>
+            throw new InvalidOperationException("HTTP must not be used for a verified hub-cache snapshot link.")));
+
+        HuggingFaceModelInstallResult result = await new HuggingFaceModelInstaller(client).InstallAsync(
+            temp.Path,
+            TestComponent(),
+            model,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(HuggingFaceModelInstallDisposition.ReusedVerified, result.Disposition);
+        Assert.False(result.CreatedThisRun);
+        Assert.Equal(modelPath, result.ModelPath);
+    }
+
+    [Fact]
     public async Task RuntimeInstall_ReplacesExactUnclaimedCatalogDirectory()
     {
         using var temp = new TempDirectory();
@@ -816,6 +854,20 @@ public sealed class LocalAiInstallRecoveryTests
         }) ?? throw new InvalidOperationException("Failed to start mklink.");
         process.WaitForExit();
         Assert.Equal(0, process.ExitCode);
+    }
+
+    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private sealed class DelegateHandler(
