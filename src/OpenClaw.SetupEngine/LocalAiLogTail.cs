@@ -99,7 +99,7 @@ internal static partial class LocalAiLogTail
     }
 
     [GeneratedRegex(
-        @"CUDA error|cudaError|exited with status|failed to load|out of memory|\berror\s*:",
+        @"CUDA error|cudaError|exited with status|failed to load|failed to allocate|out of memory|\berror\s*:",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DiagnosticPattern();
 }

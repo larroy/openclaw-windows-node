@@ -42,6 +42,22 @@ public sealed class LocalAiLogTailTests
         srv  llama_server: listening on http://<host>:54883/
         """;
 
+    /// <summary>
+    /// Regression guard: llama.cpp reports host/device memory allocation failures as
+    /// "failed to allocate ... buffer" (e.g. from <c>ggml_gallocr_reserve_n_impl</c> or
+    /// <c>llama_new_context_with_model</c>), a distinct failure mode from the CUDA
+    /// flash-attention crash above and one that previously matched none of the recognized
+    /// markers, silently dropping the actual root cause.
+    /// </summary>
+    private const string AllocationFailureLog =
+        """
+        [54881] llama_new_context_with_model: constructing llama_context
+        [54881] llama_kv_cache: CUDA0 KV buffer size = 16384.00 MiB
+        [54881] ggml_gallocr_reserve_n_impl: failed to allocate CUDA0 buffer of size 4294967296
+        [54881] graph_reserve: failed to allocate compute buffers
+        srv    operator(): instance name=qwen3.6-27b-mtp-q4-k-m exited with status -1073740791
+        """;
+
     [Fact]
     public void ExtractDiagnosticLines_ReturnsCudaAndExitStatusLines()
     {
@@ -51,6 +67,16 @@ public sealed class LocalAiLogTailTests
         Assert.Contains(lines, line => line.Contains("CUDA error", StringComparison.Ordinal));
         Assert.Contains(lines, line => line.Contains("exited with status", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, line => line.Contains("graph splits", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExtractDiagnosticLines_ReturnsAllocationFailureLines()
+    {
+        IReadOnlyList<string> lines = LocalAiLogTail.ExtractDiagnosticLines(AllocationFailureLog);
+
+        Assert.Contains(lines, line => line.Contains("failed to allocate CUDA0 buffer", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("failed to allocate compute buffers", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("constructing llama_context", StringComparison.Ordinal));
     }
 
     [Fact]
