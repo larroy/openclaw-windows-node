@@ -180,4 +180,105 @@ public sealed class HuggingFaceHubCacheTests
         Assert.Empty(validatedPath);
         Assert.Contains("fully qualified", error, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TryValidateSnapshotReadPath_AcceptsStandardRepositoryBlobSymlink()
+    {
+        using var temp = new TempDirectory();
+        string repository = Path.Combine(temp.Path, "models--owner--repo");
+        string blobs = Path.Combine(repository, "blobs");
+        string snapshot = Path.Combine(repository, "snapshots", new string('a', 40));
+        string blob = Path.Combine(blobs, new string('b', 64));
+        string pointer = Path.Combine(snapshot, "model.gguf");
+        Directory.CreateDirectory(blobs);
+        Directory.CreateDirectory(snapshot);
+        File.WriteAllText(blob, "verified model");
+        if (!TryCreateSymbolicLink(pointer, Path.GetRelativePath(snapshot, blob)))
+            return;
+
+        bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
+            temp.Path,
+            pointer,
+            out string validatedPath,
+            out string readError);
+        bool writable = HuggingFaceHubCache.TryValidateManagedPath(
+            temp.Path,
+            pointer,
+            out _,
+            out string writeError);
+
+        Assert.True(readable, readError);
+        Assert.Equal(pointer, validatedPath);
+        Assert.False(writable);
+        Assert.Contains("reparse point", writeError, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidateSnapshotReadPath_RejectsSymlinkOutsideRepositoryBlobs()
+    {
+        using var temp = new TempDirectory();
+        using var outside = new TempDirectory();
+        string repository = Path.Combine(temp.Path, "models--owner--repo");
+        string blobs = Path.Combine(repository, "blobs");
+        string snapshot = Path.Combine(repository, "snapshots", new string('a', 40));
+        string outsideModel = Path.Combine(outside.Path, "model.gguf");
+        string pointer = Path.Combine(snapshot, "model.gguf");
+        Directory.CreateDirectory(blobs);
+        Directory.CreateDirectory(snapshot);
+        File.WriteAllText(outsideModel, "untrusted model");
+        if (!TryCreateSymbolicLink(pointer, outsideModel))
+            return;
+
+        bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
+            temp.Path,
+            pointer,
+            out string validatedPath,
+            out string error);
+
+        Assert.False(readable);
+        Assert.Empty(validatedPath);
+        Assert.Contains("outside the hub cache root", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TryValidateSnapshotReadPath_RejectsSymlinkIntoSiblingRepositoryBlobs()
+    {
+        using var temp = new TempDirectory();
+        string repository = Path.Combine(temp.Path, "models--owner--repo");
+        string repositoryBlobs = Path.Combine(repository, "blobs");
+        string snapshot = Path.Combine(repository, "snapshots", new string('a', 40));
+        string siblingBlobs = Path.Combine(temp.Path, "models--owner--other", "blobs");
+        string siblingBlob = Path.Combine(siblingBlobs, new string('b', 64));
+        string pointer = Path.Combine(snapshot, "model.gguf");
+        Directory.CreateDirectory(repositoryBlobs);
+        Directory.CreateDirectory(snapshot);
+        Directory.CreateDirectory(siblingBlobs);
+        File.WriteAllText(siblingBlob, "wrong repository");
+        if (!TryCreateSymbolicLink(pointer, siblingBlob))
+            return;
+
+        bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
+            temp.Path,
+            pointer,
+            out string validatedPath,
+            out string error);
+
+        Assert.False(readable);
+        Assert.Empty(validatedPath);
+        Assert.Contains("its repository blobs directory", error, StringComparison.Ordinal);
+    }
+
+    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
 }

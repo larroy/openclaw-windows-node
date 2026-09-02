@@ -47,6 +47,35 @@ public sealed class LocalAiPortLifecycleTests
     }
 
     [Fact]
+    public async Task Manifest_RoundTripsStandardHubSnapshotSymlink()
+    {
+        using var temp = new TempDirectory("local-ai-manifest-link-");
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        LocalAiInstallManifest manifest = ValidManifest(cacheRoot);
+        string snapshotDirectory = Path.GetDirectoryName(manifest.ModelPath)!;
+        string repositoryDirectory = Directory.GetParent(
+            Directory.GetParent(snapshotDirectory)!.FullName)!.FullName;
+        string blobsDirectory = Path.Combine(repositoryDirectory, "blobs");
+        string blobPath = Path.Combine(blobsDirectory, manifest.ModelAsset.Sha256);
+        Directory.CreateDirectory(blobsDirectory);
+        Directory.CreateDirectory(snapshotDirectory);
+        await File.WriteAllTextAsync(blobPath, "verified model");
+        if (!TryCreateSymbolicLink(
+                manifest.ModelPath,
+                Path.GetRelativePath(snapshotDirectory, blobPath)))
+        {
+            return;
+        }
+
+        var store = new LocalAiManifestStore(new LocalAiPaths(temp.Path));
+        await store.SaveAsync(manifest);
+        LocalAiResolvedInstall saved = (await store.LoadAsync())!;
+
+        Assert.Equal(manifest.ModelPath, saved.ModelPath);
+    }
+
+    [Fact]
     public async Task Manifest_AcceptsAndIgnoresLegacyHardwareProfileId()
     {
         using var temp = new TempDirectory("local-ai-manifest-");
@@ -679,7 +708,7 @@ public sealed class LocalAiPortLifecycleTests
     public async Task Router_LaunchesRetiredQwen9BInstallAfterUpgrade()
     {
         using var temp = new TempDirectory("local-ai-legacy-model-");
-        var paths = new LocalAiPaths(temp.Path);
+        using var hubCacheScope = LegacyHubCacheScope(temp, out LocalAiPaths paths);
         var store = new LocalAiManifestStore(paths);
         await store.SaveAsync(LegacyQwen9BManifest());
         JsonObject legacyJson = (JsonNode.Parse(await File.ReadAllTextAsync(paths.ManifestPath)) as JsonObject)!;
@@ -729,7 +758,7 @@ public sealed class LocalAiPortLifecycleTests
     public async Task Router_RejectsRetiredQwen9BReceiptWithUnsupportedProfile()
     {
         using var temp = new TempDirectory("local-ai-legacy-profile-");
-        var paths = new LocalAiPaths(temp.Path);
+        using var hubCacheScope = LegacyHubCacheScope(temp, out LocalAiPaths paths);
         var store = new LocalAiManifestStore(paths);
         await store.SaveAsync(LegacyQwen9BManifest() with
         {
@@ -746,14 +775,60 @@ public sealed class LocalAiPortLifecycleTests
         Assert.Contains("qualified catalog profile", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Stages an isolated, per-test Hugging Face hub cache containing the retired
+    /// Qwen3.5 9B weights file, so its legacy receipt resolves under the schema-v4
+    /// absolute <c>ModelPath</c> layout. The returned scope must be kept alive
+    /// (e.g. via <c>using</c>) for as long as the manifest may still be reloaded
+    /// and revalidated.
+    /// </summary>
+    private static IDisposable LegacyHubCacheScope(TempDirectory temp, out LocalAiPaths paths)
+    {
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        var hubCacheScope = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        try
+        {
+            Assert.True(
+                HuggingFaceHubCache.TryGetSnapshotPaths(
+                    cacheRoot,
+                    "unsloth/Qwen3.5-9B-MTP-GGUF",
+                    "9716a636ee4bddc3fed678220b7a33dd2a4160ae",
+                    "Qwen3.5-9B-Q4_K_M.gguf",
+                    out string legacyModelPath,
+                    out _,
+                    out string pathError),
+                pathError);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyModelPath)!);
+            using (var stream = new FileStream(legacyModelPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                stream.SetLength(5_868_826_976);
+            paths = new LocalAiPaths(temp.Path);
+            return hubCacheScope;
+        }
+        catch
+        {
+            hubCacheScope.Dispose();
+            throw;
+        }
+    }
+
     private static LocalAiInstallManifest LegacyQwen9BManifest()
     {
         LlamaRuntimeVariant runtime = LlamaRuntimeCatalog.Find(
             System.Runtime.InteropServices.Architecture.Arm64)!;
+        Assert.True(
+            HuggingFaceHubCache.TryGetSnapshotPaths(
+                HuggingFaceHubCache.ResolveCacheRoot(),
+                "unsloth/Qwen3.5-9B-MTP-GGUF",
+                "9716a636ee4bddc3fed678220b7a33dd2a4160ae",
+                "Qwen3.5-9B-Q4_K_M.gguf",
+                out string legacyModelPath,
+                out _,
+                out string pathError),
+            pathError);
         return ValidManifest() with
         {
             ModelCatalogId = LocalModelCatalog.Qwen9BModelId,
-            ModelPath = Path.Combine("models", "Qwen3.5-9B-Q4_K_M.gguf"),
+            ModelPath = legacyModelPath,
             ModelId = "unsloth/Qwen3.5-9B-MTP-GGUF@9716a636ee4bddc3fed678220b7a33dd2a4160ae",
             ModelAlias = LocalModelCatalog.Qwen9BModelId,
             ModelAsset = new LocalAiAssetReceipt
@@ -833,6 +908,20 @@ public sealed class LocalAiPortLifecycleTests
             DraftValueCachePrecision = KvCachePrecision.Q8_0,
             InstalledAtUtc = DateTimeOffset.Parse("2026-08-18T12:00:00Z"),
         };
+    }
+
+    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 
     private sealed class FakePlatform : ILlamaServerRuntimePlatform

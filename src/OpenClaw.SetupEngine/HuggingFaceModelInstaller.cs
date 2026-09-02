@@ -146,6 +146,20 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        if (!HuggingFaceHubCache.TryValidateManagedPath(
+                cacheRoot,
+                modelPath,
+                out modelPath,
+                out pathError) ||
+            !HuggingFaceHubCache.TryValidateManagedPath(
+                cacheRoot,
+                partialPath,
+                out partialPath,
+                out pathError))
+        {
+            throw new HuggingFaceModelInstallException(pathError);
+        }
+
         var promoted = false;
         var preservePartial = false;
         try
@@ -179,7 +193,17 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                     out string revalidatedPartialPath,
                     out pathError) ||
                 !string.Equals(modelPath, revalidatedModelPath, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(partialPath, revalidatedPartialPath, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(partialPath, revalidatedPartialPath, StringComparison.OrdinalIgnoreCase) ||
+                !HuggingFaceHubCache.TryValidateManagedPath(
+                    cacheRoot,
+                    modelPath,
+                    out string writableModelPath,
+                    out pathError) ||
+                !HuggingFaceHubCache.TryValidateManagedPath(
+                    cacheRoot,
+                    partialPath,
+                    out string writablePartialPath,
+                    out pathError))
             {
                 throw new HuggingFaceModelInstallException(
                     string.IsNullOrWhiteSpace(pathError)
@@ -193,7 +217,7 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                     "The Local AI model target appeared while the download was in progress.");
             }
 
-            File.Move(partialPath, modelPath);
+            File.Move(writablePartialPath, writableModelPath);
             promoted = true;
             return new HuggingFaceModelInstallResult(
                 modelPath,
@@ -361,8 +385,17 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
             await HashExistingPartialAsync(partialPath, hash, cancellationToken).ConfigureAwait(false);
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        if (!HuggingFaceHubCache.TryValidateManagedPath(
+                HuggingFaceHubCache.ResolveCacheRoot(),
+                partialPath,
+                out string writablePartialPath,
+                out string pathError))
+        {
+            throw new HuggingFaceModelInstallException(pathError);
+        }
+
         await using var destination = new FileStream(
-            partialPath,
+            writablePartialPath,
             append ? FileMode.Append : FileMode.Create,
             FileAccess.Write,
             FileShare.None,
@@ -497,20 +530,26 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         IncrementalHash hash,
         CancellationToken cancellationToken)
     {
-        await using var stream = new FileStream(
-            partialPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            BufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var buffer = new byte[BufferSize];
-        while (true)
+        if (!HuggingFaceHubCache.TryOpenSnapshotReadPath(
+                HuggingFaceHubCache.ResolveCacheRoot(),
+                partialPath,
+                out FileStream? stream,
+                out _,
+                out string error))
         {
-            int read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-                return;
-            hash.AppendData(buffer, 0, read);
+            throw new HuggingFaceModelInstallException(error);
+        }
+
+        await using FileStream validatedStream = stream!;
+        {
+            var buffer = new byte[BufferSize];
+            while (true)
+            {
+                int read = await validatedStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                    return;
+                hash.AppendData(buffer, 0, read);
+            }
         }
     }
 
@@ -519,18 +558,24 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         PinnedArtifact artifact,
         CancellationToken cancellationToken)
     {
-        if (new FileInfo(path).Length != artifact.SizeBytes)
+        if (!HuggingFaceHubCache.TryOpenSnapshotReadPath(
+                HuggingFaceHubCache.ResolveCacheRoot(),
+                path,
+                out FileStream? stream,
+                out _,
+                out _))
+        {
             return false;
+        }
 
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            BufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        byte[] actual = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
-        return CryptographicOperations.FixedTimeEquals(actual, Convert.FromHexString(artifact.Sha256.Value));
+        await using FileStream validatedStream = stream!;
+        {
+            if (validatedStream.Length != artifact.SizeBytes)
+                return false;
+
+            byte[] actual = await SHA256.HashDataAsync(validatedStream, cancellationToken).ConfigureAwait(false);
+            return CryptographicOperations.FixedTimeEquals(actual, Convert.FromHexString(artifact.Sha256.Value));
+        }
     }
 
     private void Report(
