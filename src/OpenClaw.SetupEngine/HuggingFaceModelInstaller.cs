@@ -106,15 +106,15 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                 "The Local AI model must be an immutable Hugging Face weights artifact.");
         }
 
-        if (!LocalAiPathPolicy.TryResolve(localDataDirectory, component, out LocalAiSetupPaths paths, out string pathError) ||
-            !LocalAiPathPolicy.TryGetModelPaths(
-                paths,
+        string cacheRoot = HuggingFaceHubCache.ResolveCacheRoot();
+        if (!HuggingFaceHubCache.TryGetSnapshotPaths(
+                cacheRoot,
                 source.RepositoryId,
                 source.RevisionSha,
                 model.Weights.RelativePath,
                 out string modelPath,
                 out string partialPath,
-                out pathError))
+                out string pathError))
         {
             throw new HuggingFaceModelInstallException(pathError);
         }
@@ -134,8 +134,8 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                     CreatedThisRun: false);
             }
 
-            if (!LocalAiPathPolicy.TryValidateManagedDeleteTarget(
-                    localDataDirectory,
+            if (!HuggingFaceHubCache.TryValidateManagedPath(
+                    cacheRoot,
                     modelPath,
                     out string invalidModelPath,
                     out pathError))
@@ -158,12 +158,11 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                 if (File.Exists(partialPath) &&
                     new FileInfo(partialPath).Length >= model.Weights.SizeBytes)
                 {
-                    TryDeletePartial(localDataDirectory, partialPath);
+                    TryDeletePartial(partialPath);
                 }
 
                 await DownloadAndVerifyAsync(
                         model.Weights,
-                        localDataDirectory,
                         partialPath,
                         progress,
                         cancellationToken)
@@ -171,13 +170,8 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            if (!LocalAiPathPolicy.TryResolve(
-                    localDataDirectory,
-                    component,
-                    out LocalAiSetupPaths revalidatedPaths,
-                    out pathError) ||
-                !LocalAiPathPolicy.TryGetModelPaths(
-                    revalidatedPaths,
+            if (!HuggingFaceHubCache.TryGetSnapshotPaths(
+                    cacheRoot,
                     source.RepositoryId,
                     source.RevisionSha,
                     model.Weights.RelativePath,
@@ -220,7 +214,7 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         finally
         {
             if (!promoted && !preservePartial)
-                TryDeletePartial(localDataDirectory, partialPath);
+                TryDeletePartial(partialPath);
         }
     }
 
@@ -230,8 +224,8 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         if (!install.CreatedThisRun)
             return;
 
-        if (!LocalAiPathPolicy.TryValidateManagedDeleteTarget(
-                localDataDirectory,
+        if (!HuggingFaceHubCache.TryValidateManagedPath(
+                HuggingFaceHubCache.ResolveCacheRoot(),
                 install.ModelPath,
                 out string deletePath,
                 out string error))
@@ -252,19 +246,14 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         ArgumentNullException.ThrowIfNull(model);
         if (model.Weights.Source is not HuggingFaceRevisionSource source)
             throw new InvalidDataException("The Local AI model does not have immutable Hugging Face provenance.");
-        if (!LocalAiPathPolicy.TryResolve(
-                localDataDirectory,
-                component,
-                out LocalAiSetupPaths paths,
-                out string error) ||
-            !LocalAiPathPolicy.TryGetModelPaths(
-                paths,
+        if (!HuggingFaceHubCache.TryGetSnapshotPaths(
+                HuggingFaceHubCache.ResolveCacheRoot(),
                 source.RepositoryId,
                 source.RevisionSha,
                 model.Weights.RelativePath,
                 out _,
                 out string partialPath,
-                out error))
+                out string error))
         {
             throw new InvalidDataException(
                 string.IsNullOrWhiteSpace(error) ? "The Local AI partial model path is invalid." : error);
@@ -274,8 +263,8 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
             throw new InvalidDataException("The Local AI partial model path is an existing directory.");
         if (File.Exists(partialPath))
         {
-            if (!LocalAiPathPolicy.TryValidateManagedDeleteTarget(
-                    localDataDirectory,
+            if (!HuggingFaceHubCache.TryValidateManagedPath(
+                    HuggingFaceHubCache.ResolveCacheRoot(),
                     partialPath,
                     out string deletePath,
                     out error))
@@ -288,7 +277,6 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
 
     private async Task DownloadAndVerifyAsync(
         PinnedArtifact artifact,
-        string localDataDirectory,
         string partialPath,
         IProgress<HuggingFaceModelInstallProgress>? progress,
         CancellationToken cancellationToken)
@@ -299,7 +287,6 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
             {
                 await DownloadAndVerifyAttemptAsync(
                         artifact,
-                        localDataDirectory,
                         partialPath,
                         progress,
                         cancellationToken)
@@ -319,7 +306,6 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
 
     private async Task DownloadAndVerifyAttemptAsync(
         PinnedArtifact artifact,
-        string localDataDirectory,
         string partialPath,
         IProgress<HuggingFaceModelInstallProgress>? progress,
         CancellationToken cancellationToken)
@@ -327,7 +313,7 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         long resumeOffset = File.Exists(partialPath) ? new FileInfo(partialPath).Length : 0;
         if (resumeOffset < 0 || resumeOffset >= artifact.SizeBytes)
         {
-            TryDeletePartial(localDataDirectory, partialPath);
+            TryDeletePartial(partialPath);
             resumeOffset = 0;
         }
 
@@ -557,12 +543,12 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
         ProgressChanged?.Invoke(this, value);
     }
 
-    private static void TryDeletePartial(string localDataDirectory, string partialPath)
+    private static void TryDeletePartial(string partialPath)
     {
         try
         {
-            if (LocalAiPathPolicy.TryValidateManagedDeleteTarget(
-                    localDataDirectory,
+            if (HuggingFaceHubCache.TryValidateManagedPath(
+                    HuggingFaceHubCache.ResolveCacheRoot(),
                     partialPath,
                     out string deletePath,
                     out _) &&

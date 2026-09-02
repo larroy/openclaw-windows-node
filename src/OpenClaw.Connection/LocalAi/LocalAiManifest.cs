@@ -15,7 +15,6 @@ public sealed class LocalAiPaths
         RootDirectory = Path.Combine(LocalDataDirectory, "LocalAI");
         ManifestPath = Path.Combine(RootDirectory, "state.json");
         EnginesDirectory = Path.Combine(RootDirectory, "engines");
-        ModelsDirectory = Path.Combine(RootDirectory, "models");
         DownloadsDirectory = Path.Combine(RootDirectory, "downloads");
         StagingDirectory = Path.Combine(RootDirectory, "staging");
         LogsDirectory = Path.Combine(RootDirectory, "logs");
@@ -28,7 +27,6 @@ public sealed class LocalAiPaths
     public string RootDirectory { get; }
     public string ManifestPath { get; }
     public string EnginesDirectory { get; }
-    public string ModelsDirectory { get; }
     public string DownloadsDirectory { get; }
     public string StagingDirectory { get; }
     public string LogsDirectory { get; }
@@ -40,7 +38,6 @@ public sealed class LocalAiPaths
     {
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(EnginesDirectory);
-        Directory.CreateDirectory(ModelsDirectory);
         Directory.CreateDirectory(DownloadsDirectory);
         Directory.CreateDirectory(StagingDirectory);
         Directory.CreateDirectory(LogsDirectory);
@@ -120,7 +117,7 @@ public sealed record LocalAiAssetReceipt
 
 public sealed record LocalAiInstallManifest
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public const string SupportedEngine = "llama-server";
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -138,6 +135,13 @@ public sealed record LocalAiInstallManifest
     public required string SelectedGpuId { get; init; }
     public required string ExecutablePath { get; init; }
     public required ImmutableArray<LocalAiAssetReceipt> RuntimeAssets { get; init; }
+    /// <summary>
+    /// The full path to the managed GGUF weights file. Since schema version 4 this is
+    /// an absolute path into the shared Hugging Face hub cache
+    /// (<see cref="HuggingFaceHubCache"/>), not a path relative to <see cref="LocalAiPaths.RootDirectory"/> --
+    /// models are downloaded once into that shared, standard-layout cache so they can
+    /// be reused across installs and by other Hugging-Face-cache-aware tools.
+    /// </summary>
     public required string ModelPath { get; init; }
     public required string ModelId { get; init; }
     public required string ModelAlias { get; init; }
@@ -367,7 +371,15 @@ public sealed class LocalAiManifestStore
         if (!string.Equals(Path.GetFileName(executable), "llama-server.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The managed local AI executable must be llama-server.exe.");
 
-        var model = _paths.ResolveContainedPath(manifest.ModelPath, nameof(manifest.ModelPath));
+        if (!HuggingFaceHubCache.TryValidateManagedPath(
+                HuggingFaceHubCache.ResolveCacheRoot(),
+                manifest.ModelPath,
+                out string model,
+                out string modelPathError))
+        {
+            throw new InvalidDataException(
+                string.IsNullOrWhiteSpace(modelPathError) ? "The managed model path is invalid." : modelPathError);
+        }
         if (!string.Equals(Path.GetExtension(model), ".gguf", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The managed local AI model must be a GGUF file.");
         if (!string.Equals(Path.GetFileName(model), manifest.ModelAsset.FileName, StringComparison.Ordinal))

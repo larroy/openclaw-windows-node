@@ -6,19 +6,23 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using OpenClaw.Connection.LocalAi;
 using OpenClaw.Shared.Inference.Catalog;
+using OpenClaw.TestSupport;
 
 namespace OpenClaw.SetupEngine.Tests;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class LocalAiInstallRecoveryTests
 {
     [Fact]
     public async Task ModelInstall_ResumesExactPartialWithValidatedRange()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         byte[] modelBytes = "verified-model"u8.ToArray();
         LocalModelInfo model = CreateModel(modelBytes);
         LocalAiComponentIdentity component = TestComponent();
-        (string modelPath, string partialPath) = ResolveModelPaths(temp.Path, component, model);
+        (string modelPath, string partialPath) = ResolveModelPaths(cacheRoot, model);
         Directory.CreateDirectory(Path.GetDirectoryName(partialPath)!);
         await File.WriteAllBytesAsync(partialPath, modelBytes[..4]);
         RangeHeaderValue? observedRange = null;
@@ -53,10 +57,12 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task ModelInstall_ServerIgnoringRangeRestartsFromZero()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         byte[] modelBytes = "verified-model"u8.ToArray();
         LocalModelInfo model = CreateModel(modelBytes);
         LocalAiComponentIdentity component = TestComponent();
-        (string modelPath, string partialPath) = ResolveModelPaths(temp.Path, component, model);
+        (string modelPath, string partialPath) = ResolveModelPaths(cacheRoot, model);
         Directory.CreateDirectory(Path.GetDirectoryName(partialPath)!);
         await File.WriteAllBytesAsync(partialPath, "old"u8.ToArray());
         using var client = new HttpClient(new DelegateHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -78,10 +84,12 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task ModelInstall_InvalidRangeDeletesUntrustedPartial()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         byte[] modelBytes = "verified-model"u8.ToArray();
         LocalModelInfo model = CreateModel(modelBytes);
         LocalAiComponentIdentity component = TestComponent();
-        (_, string partialPath) = ResolveModelPaths(temp.Path, component, model);
+        (_, string partialPath) = ResolveModelPaths(cacheRoot, model);
         Directory.CreateDirectory(Path.GetDirectoryName(partialPath)!);
         await File.WriteAllBytesAsync(partialPath, modelBytes[..4]);
         using var client = new HttpClient(new DelegateHandler(_ =>
@@ -112,10 +120,12 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task ModelInstall_TransientFailurePreservesResumablePartial()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         byte[] modelBytes = "a-model-large-enough-to-retry"u8.ToArray();
         LocalModelInfo model = CreateModel(modelBytes);
         LocalAiComponentIdentity component = TestComponent();
-        (_, string partialPath) = ResolveModelPaths(temp.Path, component, model);
+        (_, string partialPath) = ResolveModelPaths(cacheRoot, model);
         using var client = new HttpClient(new DelegateHandler(request =>
         {
             long offset = request.Headers.Range?.Ranges.Single().From ?? 0;
@@ -153,10 +163,12 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task ModelInstall_VerifiedCompletePartialPromotesWithoutHttp()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         byte[] modelBytes = "verified-model"u8.ToArray();
         LocalModelInfo model = CreateModel(modelBytes);
         LocalAiComponentIdentity component = TestComponent();
-        (string modelPath, string partialPath) = ResolveModelPaths(temp.Path, component, model);
+        (string modelPath, string partialPath) = ResolveModelPaths(cacheRoot, model);
         Directory.CreateDirectory(Path.GetDirectoryName(partialPath)!);
         await File.WriteAllBytesAsync(partialPath, modelBytes);
         using var client = new HttpClient(new DelegateHandler(_ =>
@@ -468,9 +480,11 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task Reconciler_ReusesOnlyMatchingManifestWithoutMutation()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         LocalInferencePlan plan = CatalogPlan();
         const string gpuId = "GPU-0";
-        LocalAiInstallManifest manifest = CreateManifest(temp.Path, plan, gpuId);
+        LocalAiInstallManifest manifest = CreateManifest(temp.Path, cacheRoot, plan, gpuId);
         var paths = new LocalAiPaths(temp.Path);
         await new LocalAiManifestStore(paths).SaveAsync(manifest);
         byte[] original = await File.ReadAllBytesAsync(paths.ManifestPath);
@@ -524,9 +538,11 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task Reconciler_RejectsDifferentGpuWithoutDeletingManifest()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         LocalInferencePlan plan = CatalogPlan();
         var paths = new LocalAiPaths(temp.Path);
-        await new LocalAiManifestStore(paths).SaveAsync(CreateManifest(temp.Path, plan, "GPU-0"));
+        await new LocalAiManifestStore(paths).SaveAsync(CreateManifest(temp.Path, cacheRoot, plan, "GPU-0"));
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             new LocalAiInstallReconciler(new ValidRuntimeInspector(), new AcceptingModelVerifier())
@@ -623,6 +639,7 @@ public sealed class LocalAiInstallRecoveryTests
 
     private static LocalAiInstallManifest CreateManifest(
         string localDataDirectory,
+        string cacheRoot,
         LocalInferencePlan plan,
         string gpuId)
     {
@@ -634,8 +651,8 @@ public sealed class LocalAiInstallRecoveryTests
             out string error), error);
         var paths = new LocalAiPaths(localDataDirectory);
         var source = Assert.IsType<HuggingFaceRevisionSource>(plan.Model.Weights.Source);
-        Assert.True(LocalAiPathPolicy.TryGetModelPaths(
-            setupPaths,
+        Assert.True(HuggingFaceHubCache.TryGetSnapshotPaths(
+            cacheRoot,
             source.RepositoryId,
             source.RevisionSha,
             plan.Model.Weights.RelativePath,
@@ -658,7 +675,7 @@ public sealed class LocalAiInstallRecoveryTests
                 SizeBytes = artifact.SizeBytes,
                 Sha256 = artifact.Sha256.Value,
             }).ToImmutableArray(),
-            ModelPath = Path.GetRelativePath(paths.RootDirectory, modelPath),
+            ModelPath = modelPath,
             ModelId = $"{source.RepositoryId}@{source.RevisionSha}",
             ModelAlias = plan.Model.Id,
             ModelAsset = new LocalAiAssetReceipt
@@ -736,24 +753,18 @@ public sealed class LocalAiInstallRecoveryTests
     }
 
     private static (string ModelPath, string PartialPath) ResolveModelPaths(
-        string localDataDirectory,
-        LocalAiComponentIdentity component,
+        string cacheRoot,
         LocalModelInfo model)
     {
         var source = Assert.IsType<HuggingFaceRevisionSource>(model.Weights.Source);
-        Assert.True(LocalAiPathPolicy.TryResolve(
-            localDataDirectory,
-            component,
-            out LocalAiSetupPaths paths,
-            out string error), error);
-        Assert.True(LocalAiPathPolicy.TryGetModelPaths(
-            paths,
+        Assert.True(HuggingFaceHubCache.TryGetSnapshotPaths(
+            cacheRoot,
             source.RepositoryId,
             source.RevisionSha,
             model.Weights.RelativePath,
             out string modelPath,
             out string partialPath,
-            out error), error);
+            out string error), error);
         return (modelPath, partialPath);
     }
 

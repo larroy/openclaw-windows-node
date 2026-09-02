@@ -166,8 +166,8 @@ internal sealed class LocalAiInstallReconciler
         }
 
         if (plan.Model.Weights.Source is not HuggingFaceRevisionSource source ||
-            !LocalAiPathPolicy.TryGetModelPaths(
-                setupPaths,
+            !HuggingFaceHubCache.TryGetSnapshotPaths(
+                HuggingFaceHubCache.ResolveCacheRoot(),
                 source.RepositoryId,
                 source.RevisionSha,
                 plan.Model.Weights.RelativePath,
