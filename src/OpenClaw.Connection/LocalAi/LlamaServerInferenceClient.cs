@@ -224,7 +224,11 @@ public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
     /// <summary>
     /// Best-effort extraction of llama-server's own error text so a failed setup reports a root
     /// cause instead of a bare status code. Never throws, and never reads assistant output: this
-    /// runs only on a non-success response, and reads only the server-generated error members.
+    /// runs only on a non-success response, and reads only llama-server's recognized
+    /// <c>{"error": ...}</c> shape. Anything else — HTML, a differently-shaped JSON body, or a
+    /// truncated/malformed payload — is not attributable to llama-server's own diagnostics and
+    /// yields <see langword="null"/> (status-only) rather than surfacing an unvetted raw body
+    /// through the exception message, setup log, and completion UI.
     /// </summary>
     private static async Task<string?> ReadErrorDetailAsync(
         HttpContent content,
@@ -261,10 +265,10 @@ public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
         }
         catch (JsonException)
         {
-            // Not JSON, or truncated. Fall through to the raw snippet.
+            // Not JSON, or truncated. No recognized llama-server error shape to surface.
         }
 
-        return Sanitize(Encoding.UTF8.GetString(payload));
+        return null;
     }
 
     private static string? ReadStringProperty(JsonElement value, string propertyName) =>

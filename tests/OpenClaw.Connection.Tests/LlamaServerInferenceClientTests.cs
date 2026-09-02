@@ -36,15 +36,25 @@ public sealed class LlamaServerInferenceClientTests
         Assert.Contains("failed to load", failure.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Security-boundary regression: a body that is not llama-server's recognized
+    /// <c>{"error": ...}</c> shape — HTML, malformed JSON, or JSON with a different shape — must
+    /// never surface, even truncated. Only a recognized error field is server diagnostic evidence;
+    /// anything else is an unvetted raw body and must fall back to status-only. Each case below
+    /// embeds a sentinel that must never reach <see cref="LlamaServerInferenceException.Message"/>
+    /// or <see cref="LlamaServerInferenceException.ServerError"/>.
+    /// </summary>
     [Theory]
     [InlineData("")]
-    [InlineData("<html>500</html>")]
-    [InlineData("{")]
-    [InlineData("""{"detail":"nope"}""")]
+    [InlineData("<html>SENTINEL-UNRECOGNIZED-BODY</html>")]
+    [InlineData("{SENTINEL-UNRECOGNIZED-BODY")]
+    [InlineData("""{"detail":"SENTINEL-UNRECOGNIZED-BODY"}""")]
     [InlineData("oversized")]
     public async Task VerifyAsync_FallsBackToStatusOnlyWhenErrorBodyIsUnusable(string body)
     {
-        string payload = body == "oversized" ? new string('x', 32 * 1024) : body;
+        string payload = body == "oversized"
+            ? new string('x', 32 * 1024) + "SENTINEL-UNRECOGNIZED-BODY"
+            : body;
         using var client = new LlamaServerInferenceClient(
             new DelegateHandler((_, _) => Task.FromResult(
                 Response(HttpStatusCode.InternalServerError, payload))));
@@ -54,7 +64,11 @@ public sealed class LlamaServerInferenceClientTests
                 () => client.VerifyAsync(s_endpoint, ModelAlias));
 
         Assert.Equal(500, failure.StatusCode);
-        Assert.Contains("HTTP 500", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            "llama-server inference returned HTTP 500 (InternalServerError).",
+            failure.Message);
+        Assert.Null(failure.ServerError);
+        Assert.DoesNotContain("SENTINEL", failure.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

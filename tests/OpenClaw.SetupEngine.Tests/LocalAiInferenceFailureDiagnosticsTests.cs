@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using OpenClaw.Connection.LocalAi;
 using OpenClaw.Shared.Inference;
 using OpenClaw.Shared.Inference.Catalog;
@@ -84,6 +86,37 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
         LocalAiFailureDetail detail = Assert.IsType<LocalAiFailureDetail>(result.Detail);
         Assert.Empty(detail.Diagnostics);
         Assert.Equal(new LocalAiPaths(temp.Path).LogsDirectory, detail.LogDirectory);
+    }
+
+    /// <summary>
+    /// Security-boundary regression, end to end: a response body that is not llama-server's
+    /// recognized <c>{"error": ...}</c> shape must never reach <see cref="StepResult.Message"/> or
+    /// <see cref="LocalAiFailureDetail"/>, which the setup log and completion UI render verbatim.
+    /// Drives the real <see cref="LlamaServerInferenceClient"/> (not a hand-built exception) so the
+    /// assertion covers the actual HTTP response parsing path, not just the step's plumbing.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_NeverSurfacesUnrecognizedResponseBodyInStepResultOrDetail()
+    {
+        const string sentinel = "SENTINEL-UNRECOGNIZED-BODY";
+        using var temp = new TempDirectory("local-ai-inference-unrecognized-body-");
+        (SetupContext context, _) = CreateScenario(temp.Path);
+        var handler = new DelegateHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent(
+                $$"""{"detail":"{{sentinel}}"}""",
+                Encoding.UTF8,
+                "application/json"),
+        }));
+        var step = new VerifyLocalAiInferenceStep(() => new LlamaServerInferenceClient(handler));
+
+        StepResult result = await step.ExecuteAsync(context, CancellationToken.None);
+
+        Assert.Equal(StepOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain(sentinel, result.Message, StringComparison.Ordinal);
+        LocalAiFailureDetail detail = Assert.IsType<LocalAiFailureDetail>(result.Detail);
+        Assert.DoesNotContain(detail.Diagnostics, line => line.Contains(sentinel, StringComparison.Ordinal));
+        Assert.DoesNotContain(sentinel, detail.LogDirectory, StringComparison.Ordinal);
     }
 
     private static void WriteServerLogs(LocalAiPaths paths, string content)
@@ -201,6 +234,14 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class DelegateHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => handler(request, cancellationToken);
     }
 
     private sealed class FakeRuntime(LocalAiRuntimeSnapshot snapshot) : ILocalAiRuntime
