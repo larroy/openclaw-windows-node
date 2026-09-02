@@ -54,7 +54,10 @@ public sealed partial class CompletePage : Page
             else
             {
                 var errorMessage = args.ErrorMessage ?? "Unknown error";
-                var helpUrl = ExtractHelpUrl(errorMessage);
+                // Local AI failures (identified by Detail) carry llama-server's own error text in
+                // errorMessage. That text is diagnostic evidence, not a curated OpenClaw message,
+                // so it must never be scanned for a URL to turn into a clickable help link.
+                var helpUrl = args.Detail is null ? ExtractHelpUrl(errorMessage) : null;
 
                 SuccessIcon.Visibility = Visibility.Collapsed;
                 FailureIcon.Visibility = Visibility.Visible;
@@ -124,8 +127,9 @@ public sealed partial class CompletePage : Page
             ServerDiagnosticsText.Visibility = Visibility.Collapsed;
 
         _serverLogDirectory = detail.LogDirectory;
-        ViewServerLogLink.Content = $"Open Local AI logs → {detail.LogDirectory}";
-        ToolTipService.SetToolTip(ViewServerLogLink, detail.LogDirectory);
+        var displayDirectory = LogFileLauncher.ResolveRealPath(detail.LogDirectory);
+        ViewServerLogLink.Content = $"Open Local AI logs → {displayDirectory}";
+        ToolTipService.SetToolTip(ViewServerLogLink, displayDirectory);
         ViewServerLogLink.Visibility = Visibility.Visible;
     }
 

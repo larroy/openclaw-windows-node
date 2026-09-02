@@ -90,10 +90,14 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
 
     /// <summary>
     /// Security-boundary regression, end to end: a response body that is not llama-server's
-    /// recognized <c>{"error": ...}</c> shape must never reach <see cref="StepResult.Message"/> or
-    /// <see cref="LocalAiFailureDetail"/>, which the setup log and completion UI render verbatim.
-    /// Drives the real <see cref="LlamaServerInferenceClient"/> (not a hand-built exception) so the
-    /// assertion covers the actual HTTP response parsing path, not just the step's plumbing.
+    /// recognized <c>{"error": ...}</c> shape must never reach <see cref="StepResult.Message"/>,
+    /// which the setup log and completion UI render verbatim. Drives the real
+    /// <see cref="LlamaServerInferenceClient"/> (not a hand-built exception) so the assertion
+    /// covers the actual HTTP response parsing path, not just the step's plumbing.
+    /// <see cref="LocalAiFailureDetail.Diagnostics"/> and <see cref="LocalAiFailureDetail.LogDirectory"/>
+    /// are sourced from local log files and app-controlled paths, never from the HTTP body, so this
+    /// asserts they are unaffected (empty, and exactly the app-controlled directory) rather than
+    /// re-proving sentinel absence in data the HTTP body cannot reach.
     /// </summary>
     [Fact]
     public async Task ExecuteAsync_NeverSurfacesUnrecognizedResponseBodyInStepResultOrDetail()
@@ -115,8 +119,8 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.DoesNotContain(sentinel, result.Message, StringComparison.Ordinal);
         LocalAiFailureDetail detail = Assert.IsType<LocalAiFailureDetail>(result.Detail);
-        Assert.DoesNotContain(detail.Diagnostics, line => line.Contains(sentinel, StringComparison.Ordinal));
-        Assert.DoesNotContain(sentinel, detail.LogDirectory, StringComparison.Ordinal);
+        Assert.Empty(detail.Diagnostics);
+        Assert.Equal(new LocalAiPaths(temp.Path).LogsDirectory, detail.LogDirectory);
     }
 
     private static void WriteServerLogs(LocalAiPaths paths, string content)
