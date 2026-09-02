@@ -41,4 +41,61 @@ public sealed class CompletePageLocalAiHelpLinkContractTests
             source);
         Assert.Contains("ViewServerLogLink.Content = $\"Open Local AI logs → {displayDirectory}\";", source);
     }
+
+    /// <summary>
+    /// Correctness regression: the WinUI setup wizard defaults <c>RollbackOnFailure</c> to
+    /// <see langword="true"/> (<c>SetupContext.ApplyUiDefaults</c>), so a Local AI verification
+    /// failure deletes the whole Local AI tree — including the log directory this link points
+    /// to — before the completion page is shown. The link must not advertise a folder that no
+    /// longer exists; the diagnostic text above it remains accurate regardless, since it was
+    /// captured before the rollback.
+    /// </summary>
+    [Fact]
+    public void CompletePage_HidesServerLogLinkWhenDirectoryNoLongerExists()
+    {
+        string root = TestRepositoryPaths.GetRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(
+            root, "src", "OpenClaw.SetupEngine.UI", "Pages", "CompletePage.xaml.cs"));
+        string method = ExtractMethod(source, "private void ShowServerDiagnostics(");
+
+        Assert.Contains("if (Directory.Exists(displayDirectory))", method);
+        AssertInOrder(
+            method,
+            "if (Directory.Exists(displayDirectory))",
+            "ViewServerLogLink.Visibility = Visibility.Visible;",
+            "else",
+            "ViewServerLogLink.Visibility = Visibility.Collapsed;");
+    }
+
+    private static string ExtractMethod(string source, string methodSignature)
+    {
+        int start = source.IndexOf(methodSignature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Expected to find method starting with '{methodSignature}'.");
+        int braceDepth = 0;
+        int bodyStart = source.IndexOf('{', start);
+        Assert.True(bodyStart >= 0, "Expected an opening brace for the method body.");
+        for (int index = bodyStart; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+                braceDepth++;
+            else if (source[index] == '}')
+            {
+                braceDepth--;
+                if (braceDepth == 0)
+                    return source[start..(index + 1)];
+            }
+        }
+        throw new InvalidOperationException("Unbalanced braces while extracting method body.");
+    }
+
+    private static void AssertInOrder(string source, params string[] fragments)
+    {
+        int previousIndex = -1;
+        foreach (string fragment in fragments)
+        {
+            int index = source.IndexOf(fragment, previousIndex + 1, StringComparison.Ordinal);
+            Assert.True(index > previousIndex, $"Expected '{fragment}' after the previous fragment.");
+            previousIndex = index;
+        }
+    }
 }

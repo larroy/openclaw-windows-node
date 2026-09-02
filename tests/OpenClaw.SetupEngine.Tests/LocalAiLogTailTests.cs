@@ -29,6 +29,19 @@ public sealed class LocalAiLogTailTests
         srv  llama_server: listening on http://<host>:54883/
         """;
 
+    /// <summary>
+    /// Regression guard: routine ggml/CUDA initialization lines carry a "name:" prefix (the same
+    /// shape llama.cpp uses for genuine failures) but are not themselves failure evidence. A
+    /// pattern that matched any "ggml_xxx:"-prefixed line previously misclassified these as the
+    /// root cause of an unrelated failure.
+    /// </summary>
+    private const string BenignGgmlStartupLog =
+        """
+        ggml_cuda_init: found 1 CUDA devices:
+        ggml_backend_cuda_buffer_type_alloc_buffer: allocating 1234.56 MiB on device 0
+        srv  llama_server: listening on http://<host>:54883/
+        """;
+
     [Fact]
     public void ExtractDiagnosticLines_ReturnsCudaAndExitStatusLines()
     {
@@ -44,6 +57,12 @@ public sealed class LocalAiLogTailTests
     public void ExtractDiagnosticLines_IgnoresLogsWithoutFailureMarkers()
     {
         Assert.Empty(LocalAiLogTail.ExtractDiagnosticLines(CleanStartupLog));
+    }
+
+    [Fact]
+    public void ExtractDiagnosticLines_IgnoresRoutineGgmlInitializationLines()
+    {
+        Assert.Empty(LocalAiLogTail.ExtractDiagnosticLines(BenignGgmlStartupLog));
     }
 
     [Fact]

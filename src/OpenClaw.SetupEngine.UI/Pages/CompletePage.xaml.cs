@@ -128,9 +128,18 @@ public sealed partial class CompletePage : Page
 
         _serverLogDirectory = detail.LogDirectory;
         var displayDirectory = LogFileLauncher.ResolveRealPath(detail.LogDirectory);
-        ViewServerLogLink.Content = $"Open Local AI logs → {displayDirectory}";
-        ToolTipService.SetToolTip(ViewServerLogLink, displayDirectory);
-        ViewServerLogLink.Visibility = Visibility.Visible;
+        // A rollback on failure (the WinUI wizard's default) deletes the whole Local AI tree,
+        // including this directory, before the completion page is shown. The diagnostic lines
+        // above remain accurate regardless (they were captured before the rollback), but the
+        // link itself must not promise a folder that no longer exists.
+        if (Directory.Exists(displayDirectory))
+        {
+            ViewServerLogLink.Content = $"Open Local AI logs → {displayDirectory}";
+            ToolTipService.SetToolTip(ViewServerLogLink, displayDirectory);
+            ViewServerLogLink.Visibility = Visibility.Visible;
+        }
+        else
+            ViewServerLogLink.Visibility = Visibility.Collapsed;
     }
 
     private void ViewServerLog_Click(object sender, RoutedEventArgs e)
