@@ -546,7 +546,7 @@ public sealed class PersistLocalAiManifestStep : SetupStep
             SelectedGpuId = gpuId,
             ExecutablePath = Path.GetRelativePath(paths.RootDirectory, runtimeInstall.ExecutablePath),
             RuntimeAssets = runtimeAssets,
-            ModelPath = Path.GetRelativePath(paths.RootDirectory, modelInstall.ModelPath),
+            ModelPath = modelInstall.ModelPath,
             ModelId = $"{modelSource.RepositoryId}@{modelSource.RevisionSha}",
             ModelAlias = plan.Model.Id,
             ModelAsset = new LocalAiAssetReceipt
