@@ -546,11 +546,13 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task Reconciler_MigratesLegacyCudaPrefixedUuidSelector()
     {
         using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
         LocalInferencePlan plan = CatalogPlan();
         const string gpuUuid = "GPU-cc66bca6-b5ff-dd70-995c-d81a07add980";
         var paths = new LocalAiPaths(temp.Path);
         var store = new LocalAiManifestStore(paths);
-        await store.SaveAsync(CreateManifest(temp.Path, plan, $"cuda:{gpuUuid}"));
+        await store.SaveAsync(CreateManifest(temp.Path, cacheRoot, plan, $"cuda:{gpuUuid}"));
         var reconciler = new LocalAiInstallReconciler(
             new ValidRuntimeInspector(),
             new AcceptingModelVerifier());
