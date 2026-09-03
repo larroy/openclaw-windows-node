@@ -247,6 +247,8 @@ No params. Returns renderer capabilities (renderer, snapshot, a2ui version).
 }
 ```
 Returns `{ format, width, height, base64, image }` (image is a `data:` URL).
+The first use requires remembered user consent. Every invocation displays a
+visible notification before screen capture begins.
 
 ### screen.record
 ```
@@ -268,6 +270,8 @@ No params. Returns `{ cameras: [{ deviceId, name, isDefault }] }`.
 ```
 Returns `{ format, width, height, base64 }`. `deviceId` defaults to system
 default camera.
+The first use requires remembered user consent. Every invocation displays a
+visible notification before camera capture begins.
 
 ### camera.clip
 ```
@@ -625,6 +629,8 @@ Get the device's current geographic location.
 ```
 Returns `{ latitude, longitude, accuracy (meters), timestamp (ms) }`.
 Requires the Location capability to be enabled and OS location permission granted to the app.
+The first use also requires remembered OpenClaw consent. Every invocation
+displays a visible notification before location access begins.
 Error `LOCATION_PERMISSION_REQUIRED` if the user has not granted location access.
 
 ## Device (device.*)

@@ -49,8 +49,8 @@ Every new Windows node call must be exposed through local MCP and `winnode`: reg
   ```
 
 ### 3. Screen Capture Notification
-- When the agent captures your screen, you should see "📸 Screen Captured" toast
-- This is throttled to max once per 10 seconds
+- The first screen capture requires explicit remembered consent.
+- Every screen capture shows a "📸 Capturing screen" toast before sensor access.
 
 ### 4. Command Center
 - Open the tray status detail or launch `openclaw://commandcenter`
@@ -74,16 +74,16 @@ These features need the gateway to send `node.invoke` commands:
 | `canvas.eval` | Execute JavaScript | Runs JS in canvas, returns result |
 | `canvas.snapshot` | Capture canvas | Returns base64 PNG of canvas content |
 | `canvas.a2ui.pushJSONL` | Legacy A2UI JSONL push | Routes through same renderer path as `canvas.a2ui.push` |
-| `screen.snapshot` | Take screenshot | Captures screen, shows notification, returns base64 |
+| `screen.snapshot` | Take screenshot | Requires remembered consent, shows a notification before every capture, and returns base64 |
 | `screen.record` | Record short screen clip | Returns MP4/base64 metadata; requires explicit gateway allowlist |
 | `system.notify` | Show notification | Displays toast notification |
 | `system.run` | Controlled command execution | Uses local exec approval policy. A simple unquoted gateway command can bind to an allowlisted executable and run as direct argv; shell syntax remains one-time. Prompt decisions show a Windows Allow once / Always allow / Deny dialog when Allow always is safe. |
 | `system.run.prepare` | Pre-flight command execution | Parses and validates a `system.run` invocation without executing it |
 | `system.which` | Resolve executables | Returns absolute paths for requested binaries |
 | `camera.list` | Enumerate cameras | Returns device IDs and names |
-| `camera.snap` | Capture photo | Returns base64 image (NV12 fallback) |
+| `camera.snap` | Capture photo | Requires remembered consent, shows a notification before every capture, and returns a base64 image (NV12 fallback) |
 | `camera.clip` | Capture video clip | Returns MP4/base64 metadata |
-| `location.get` | Get Windows location | Uses Windows location permission/settings |
+| `location.get` | Get Windows location | Requires remembered consent, shows a notification before every access, and uses Windows location permission/settings |
 | `device.info` / `device.status` | Device metadata/status | Returns host/app/locale plus battery/storage/network/uptime payloads |
 | `browser.proxy` | Proxy browser-control host requests | Requires Browser proxy bridge enabled, a compatible browser-control host listening on gateway port + 2, and matching browser-control auth |
 | `tts.speak` | Speak text aloud | Requires Text-to-speech playback enabled in Settings; gateway mode also requires `tts.speak` in `gateway.nodes.allowCommands` |
@@ -128,7 +128,8 @@ Local MCP clients also see MCP-only `app.*` commands such as `app.navigate`, `ap
 ## Security Features
 
 - **URL Validation**: Canvas blocks `file://`, `javascript:`, localhost, private IPs, IPv6 localhost
-- **Screen Capture Notification**: User is notified when screen snapshots are captured
+- **Sensitive Capture Consent**: Screen snapshots, camera photos, and location reads require remembered per-capability consent
+- **Per-use Capture Notification**: Every screen snapshot, camera photo, and location read is visibly indicated before sensor access
 - **Screen Recording Allowlist**: `screen.record` must be explicitly allowed by the gateway and does not leave a hidden local MP4 copy on Windows
 - **Session Attribution**: Only the optional top-level `sessionKey` stamped by the Gateway on `node.invoke.request` is trusted. Older Gateways omit it, so those invokes remain unattributed; a caller-supplied nested `args.sessionKey` is never used as a fallback.
 - **Command Center Redaction**: recent node invoke activity records command name, status, duration, node id, and privacy class only; it does not store base64 payloads, screenshots, recordings, tokens, or command arguments

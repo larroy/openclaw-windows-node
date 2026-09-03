@@ -55,6 +55,7 @@ internal sealed class SettingsPageViewModel : INavigationAware, IDisposable, INo
     private bool _notifyInfo;
     private bool _screenRecordingConsentGiven;
     private bool _cameraRecordingConsentGiven;
+    private bool _locationConsentGiven;
     private bool _showChatToolCalls;
 
     public SettingsPageViewModel(ISettingsStore store, IAppCommands appCommands)
@@ -208,6 +209,12 @@ internal sealed class SettingsPageViewModel : INavigationAware, IDisposable, INo
         set { if (SetField(ref _cameraRecordingConsentGiven, value) && !_loading) Persist(e => e.CameraRecordingConsentGiven = value); }
     }
 
+    public bool LocationConsentGiven
+    {
+        get => _locationConsentGiven;
+        set { if (SetField(ref _locationConsentGiven, value) && !_loading) Persist(e => e.LocationConsentGiven = value); }
+    }
+
     /// <summary>
     /// "Show tool calls and usage" persists the setting. App's settings-save path
     /// applies it to every live Reactor chat host.
@@ -328,6 +335,7 @@ internal sealed class SettingsPageViewModel : INavigationAware, IDisposable, INo
             SetField(ref _notifyInfo, s.NotifyInfo, nameof(NotifyInfo));
             SetField(ref _screenRecordingConsentGiven, s.ScreenRecordingConsentGiven, nameof(ScreenRecordingConsentGiven));
             SetField(ref _cameraRecordingConsentGiven, s.CameraRecordingConsentGiven, nameof(CameraRecordingConsentGiven));
+            SetField(ref _locationConsentGiven, s.LocationConsentGiven, nameof(LocationConsentGiven));
             SetField(ref _showChatToolCalls, s.ShowChatToolCalls, nameof(ShowChatToolCalls));
         }
         finally

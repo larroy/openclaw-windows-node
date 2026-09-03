@@ -781,10 +781,22 @@
     <value>健康检查失败</value>
   </data>
   <data name="Toast_ScreenCaptured" xml:space="preserve">
-    <value>📸 屏幕已捕获</value>
+    <value>📸 正在捕获屏幕</value>
   </data>
   <data name="Toast_ScreenCapturedDetail" xml:space="preserve">
-    <value>OpenClaw 代理捕获了您的屏幕</value>
+    <value>OpenClaw 代理正在捕获您的屏幕</value>
+  </data>
+  <data name="Toast_CameraCaptured" xml:space="preserve">
+    <value>📷 正在拍摄摄像头照片</value>
+  </data>
+  <data name="Toast_CameraCapturedDetail" xml:space="preserve">
+    <value>OpenClaw 代理正在使用您的摄像头拍摄照片</value>
+  </data>
+  <data name="Toast_LocationRead" xml:space="preserve">
+    <value>📍 正在访问位置</value>
+  </data>
+  <data name="Toast_LocationReadDetail" xml:space="preserve">
+    <value>OpenClaw 代理正在访问您的设备位置</value>
   </data>
   <data name="Toast_CameraBlocked" xml:space="preserve">
     <value>📷 相机访问被阻止</value>
@@ -828,22 +840,28 @@
     <value>权限请求</value>
   </data>
   <data name="RecordingConsent_ScreenTitle" xml:space="preserve">
-    <value>允许屏幕录制？</value>
+    <value>允许屏幕捕获？</value>
   </data>
   <data name="RecordingConsent_CameraTitle" xml:space="preserve">
-    <value>允许摄像头录制？</value>
+    <value>允许摄像头捕获？</value>
+  </data>
+  <data name="RecordingConsent_LocationTitle" xml:space="preserve">
+    <value>允许访问位置？</value>
   </data>
   <data name="RecordingConsent_ScreenDescription" xml:space="preserve">
-    <value>代理正在请求录制您的屏幕。这将从您的显示器捕获视频并发送给代理。您的选择将被记住用于以后的请求，直到您在设置中更改。</value>
+    <value>代理正在请求捕获您的屏幕。这可能会从您的显示器捕获图像或视频并发送给代理。您的选择将被记住用于以后的请求。</value>
   </data>
   <data name="RecordingConsent_CameraDescription" xml:space="preserve">
-    <value>代理正在请求从您的摄像头录制。这将从您的网络摄像头捕获视频并发送给代理。您的选择将被记住用于以后的请求，直到您在设置中更改。</value>
+    <value>代理正在请求访问您的摄像头。这可能会捕获照片或视频并发送给代理。您的选择将被记住用于以后的请求。</value>
+  </data>
+  <data name="RecordingConsent_LocationDescription" xml:space="preserve">
+    <value>代理正在请求访问您的设备位置。这会将您的当前位置发送给代理。您的选择将被记住用于以后的请求。</value>
   </data>
   <data name="RecordingConsent_Privacy" xml:space="preserve">
-    <value>您可以稍后在设置中更改此项。</value>
+    <value>仅当您信任已连接的代理和网关时才允许。</value>
   </data>
   <data name="RecordingConsent_Allow" xml:space="preserve">
-    <value>允许录制</value>
+    <value>允许</value>
   </data>
   <data name="RecordingConsent_Deny" xml:space="preserve">
     <value>拒绝</value>
@@ -865,7 +883,7 @@
     <value>隐私</value>
   </data>
   <data name="SettingsPrivacyDescription.Text" xml:space="preserve">
-    <value>预先批准功能，以便代理无需每次都请求权限。录制开始前仍会显示倒计时。</value>
+    <value>允许敏感捕获时无需每次询问。OpenClaw 仍会在每次访问前通知您，并在录制前显示倒计时。</value>
   </data>
   <data name="ScreenRecordingToggle.Header" xml:space="preserve">
     <value>允许屏幕录制</value>
@@ -3764,10 +3782,13 @@
     <value>提示音</value>
   </data>
   <data name="SettingsRow_ScreenRec_Header.Text" xml:space="preserve">
-    <value>允许屏幕录制</value>
+    <value>允许屏幕捕获</value>
   </data>
   <data name="SettingsRow_CamRec_Header.Text" xml:space="preserve">
-    <value>允许摄像头录制</value>
+    <value>允许摄像头捕获</value>
+  </data>
+  <data name="SettingsRow_Location_Header.Text" xml:space="preserve">
+    <value>允许访问位置</value>
   </data>
   <data name="HubWindow_NavigationViewItem_Voice.Content" xml:space="preserve">
     <value>语音和音频</value>
@@ -4017,6 +4038,9 @@
   </data>
   <data name="SettingsRow_CamRec_Description.Text" xml:space="preserve">
     <value>Lets agents capture the camera via camera.* commands.</value>
+  </data>
+  <data name="SettingsRow_Location_Description.Text" xml:space="preserve">
+    <value>允许代理通过 location.* 命令读取设备位置。</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsVoiceIdBox.PlaceholderText" xml:space="preserve">
     <value>e.g. 21m00Tcm4TlvDq8ikWAM</value>
@@ -7079,8 +7103,9 @@
   <data name="LocalAi_Reason_UnknownModelName" xml:space="preserve"><value>所选模型</value></data>
   <data name="LocalAi_Reason_UnknownDriverVersion" xml:space="preserve"><value>未知</value></data>
   <data name="LocalAi_Reason_UnknownMemoryAmount" xml:space="preserve"><value>未知数量</value></data>
-  <data name="LocalAi_Reason_GigabytesFormat" xml:space="preserve"><value>{0:0.#} GB</value></data>
-  <data name="Onboarding_Welcome_LocalAiAvailableBadge.Text" xml:space="preserve"><value>本地 AI 可用</value></data>
+  <data name="LocalAi_Reason_GigabytesFormat" xml:space="preserve"><value>{0:0.#} GiB</value></data>
+  <data name="Onboarding_Welcome_LocalAiAvailableBadge.Text" xml:space="preserve"><value>支持本地 AI</value></data>
+  <data name="Onboarding_Welcome_LocalAiAvailabilityDetail" xml:space="preserve"><value>您的 {0} 可在此电脑上运行本地 AI。</value></data>
   <data name="Onboarding_LocalAi_WslConfigReadFailureReason" xml:space="preserve"><value>OpenClaw 无法安全读取全局 .wslconfig 文件。请检查该文件是否有效且可读,然后重试安装。</value></data>
   <data name="LocalAiPage_UnavailableProbeTitle" xml:space="preserve"><value>无法验证本地 AI 可用性</value></data>
   <data name="LocalAiPage_CheckingTitle" xml:space="preserve"><value>正在检查本地 AI 可用性</value></data>

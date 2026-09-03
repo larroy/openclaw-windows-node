@@ -268,7 +268,7 @@
                 <TextBlock x:Uid="SettingsPage_Privacy" Text="Privacy" Style="{StaticResource BodyStrongTextBlockStyle}"
                            Margin="{StaticResource SectionHeaderMargin}"/>
                 <TextBlock x:Uid="SettingsPrivacyDescription"
-                           Text="Pre-approve capabilities so agents can use them without a prompt every time. You'll still see a countdown before recording starts."
+                           Text="Allow sensitive capture without prompting every time. OpenClaw still notifies you before each access and shows a countdown before recordings."
                            Style="{StaticResource CaptionTextBlockStyle}"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            TextWrapping="Wrap" Margin="4,0,4,4"/>
@@ -282,7 +282,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Uid="SettingsRow_ScreenRec_Header" Text="Allow screen recording" Style="{StaticResource BodyTextBlockStyle}"/>
+                            <TextBlock x:Uid="SettingsRow_ScreenRec_Header" Text="Allow screen capture" Style="{StaticResource BodyTextBlockStyle}"/>
                             <TextBlock x:Uid="SettingsRow_ScreenRec_Description"
                                        Text="Lets agents capture the screen via screen.* commands."
                                        Style="{StaticResource CaptionTextBlockStyle}"
@@ -292,7 +292,7 @@
                         <ToggleSwitch Grid.Column="1" x:Name="ScreenRecordingToggle" MinWidth="0" OnContent="" OffContent=""
                                       IsOn="{Binding ScreenRecordingConsentGiven, Mode=TwoWay}"
                                       AutomationProperties.AutomationId="SettingsPageScreenRecording"
-                                      AutomationProperties.Name="Allow screen recording"/>
+                                      AutomationProperties.Name="Allow screen capture"/>
                     </Grid>
                 </Border>
 
@@ -305,7 +305,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Uid="SettingsRow_CamRec_Header" Text="Allow camera recording" Style="{StaticResource BodyTextBlockStyle}"/>
+                            <TextBlock x:Uid="SettingsRow_CamRec_Header" Text="Allow camera capture" Style="{StaticResource BodyTextBlockStyle}"/>
                             <TextBlock x:Uid="SettingsRow_CamRec_Description"
                                        Text="Lets agents capture the camera via camera.* commands."
                                        Style="{StaticResource CaptionTextBlockStyle}"
@@ -315,7 +315,30 @@
                         <ToggleSwitch Grid.Column="1" x:Name="CameraRecordingToggle" MinWidth="0" OnContent="" OffContent=""
                                       IsOn="{Binding CameraRecordingConsentGiven, Mode=TwoWay}"
                                       AutomationProperties.AutomationId="SettingsPageCameraRecording"
-                                      AutomationProperties.Name="Allow camera recording"/>
+                                      AutomationProperties.Name="Allow camera capture"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="{StaticResource SettingsRowPadding}">
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock x:Uid="SettingsRow_Location_Header" Text="Allow location access" Style="{StaticResource BodyTextBlockStyle}"/>
+                            <TextBlock x:Uid="SettingsRow_Location_Description"
+                                      Text="Lets agents read device location via location.* commands."
+                                      Style="{StaticResource CaptionTextBlockStyle}"
+                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                      TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1" x:Name="LocationConsentToggle" MinWidth="0" OnContent="" OffContent=""
+                                      IsOn="{Binding LocationConsentGiven, Mode=TwoWay}"
+                                      AutomationProperties.AutomationId="SettingsPageLocationConsent"
+                                      AutomationProperties.Name="Allow location access"/>
                     </Grid>
                 </Border>
 

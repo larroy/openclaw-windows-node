@@ -781,10 +781,22 @@ Utilisez l'une de ces options :
     <value>Vérification de l'état échouée</value>
   </data>
   <data name="Toast_ScreenCaptured" xml:space="preserve">
-    <value>📸 Capture d'écran effectuée</value>
+    <value>📸 Capture de l’écran en cours</value>
   </data>
   <data name="Toast_ScreenCapturedDetail" xml:space="preserve">
-    <value>L'agent OpenClaw a réalisé une capture d'écran</value>
+    <value>L’agent OpenClaw capture votre écran</value>
+  </data>
+  <data name="Toast_CameraCaptured" xml:space="preserve">
+    <value>📷 Capture d’une photo par webcam</value>
+  </data>
+  <data name="Toast_CameraCapturedDetail" xml:space="preserve">
+    <value>L’agent OpenClaw capture une photo avec votre caméra</value>
+  </data>
+  <data name="Toast_LocationRead" xml:space="preserve">
+    <value>📍 Accès à la localisation</value>
+  </data>
+  <data name="Toast_LocationReadDetail" xml:space="preserve">
+    <value>L’agent OpenClaw accède à la localisation de votre appareil</value>
   </data>
   <data name="Toast_CameraBlocked" xml:space="preserve">
     <value>📷 Accès à la caméra bloqué</value>
@@ -828,22 +840,28 @@ Utilisez l'une de ces options :
     <value>Demande d'autorisation</value>
   </data>
   <data name="RecordingConsent_ScreenTitle" xml:space="preserve">
-    <value>Autoriser l'enregistrement d'écran ?</value>
+    <value>Autoriser la capture d'écran ?</value>
   </data>
   <data name="RecordingConsent_CameraTitle" xml:space="preserve">
-    <value>Autoriser l'enregistrement de la caméra ?</value>
+    <value>Autoriser la capture par la caméra ?</value>
+  </data>
+  <data name="RecordingConsent_LocationTitle" xml:space="preserve">
+    <value>Autoriser l'accès à la localisation ?</value>
   </data>
   <data name="RecordingConsent_ScreenDescription" xml:space="preserve">
-    <value>Un agent demande d'enregistrer votre écran. Cela capturera la vidéo de votre affichage et l'enverra à l'agent. Votre choix sera mémorisé pour les prochaines demandes jusqu'à ce que vous le modifiiez dans les Paramètres.</value>
+    <value>Un agent demande l'accès à la capture de votre écran. Cela peut capturer des images ou une vidéo de votre affichage et les envoyer à l'agent. Votre choix sera mémorisé pour les prochaines demandes.</value>
   </data>
   <data name="RecordingConsent_CameraDescription" xml:space="preserve">
-    <value>Un agent demande d'enregistrer depuis votre caméra. Cela capturera la vidéo de votre webcam et l'enverra à l'agent. Votre choix sera mémorisé pour les prochaines demandes jusqu'à ce que vous le modifiiez dans les Paramètres.</value>
+    <value>Un agent demande l'accès à votre caméra. Cela peut capturer des photos ou une vidéo et les envoyer à l'agent. Votre choix sera mémorisé pour les prochaines demandes.</value>
+  </data>
+  <data name="RecordingConsent_LocationDescription" xml:space="preserve">
+    <value>Un agent demande l'accès à la localisation de votre appareil. Cela enverra votre position actuelle à l'agent. Votre choix sera mémorisé pour les prochaines demandes.</value>
   </data>
   <data name="RecordingConsent_Privacy" xml:space="preserve">
-    <value>Vous pouvez modifier cela ultérieurement dans les Paramètres.</value>
+    <value>Autorisez uniquement si vous faites confiance à l'agent et à la passerelle connectés.</value>
   </data>
   <data name="RecordingConsent_Allow" xml:space="preserve">
-    <value>Autoriser l'enregistrement</value>
+    <value>Autoriser</value>
   </data>
   <data name="RecordingConsent_Deny" xml:space="preserve">
     <value>Refuser</value>
@@ -865,7 +883,7 @@ Utilisez l'une de ces options :
     <value>Confidentialité</value>
   </data>
   <data name="SettingsPrivacyDescription.Text" xml:space="preserve">
-    <value>Pré-approuvez les fonctionnalités afin que les agents puissent les utiliser sans demander la permission à chaque fois. Un compte à rebours s'affichera toujours avant l'enregistrement.</value>
+    <value>Autorisez les captures sensibles sans nouvelle demande à chaque fois. OpenClaw vous avertit toujours avant chaque accès et affiche un compte à rebours avant les enregistrements.</value>
   </data>
   <data name="ScreenRecordingToggle.Header" xml:space="preserve">
     <value>Autoriser l'enregistrement d'écran</value>
@@ -3764,10 +3782,13 @@ Les commandes sont bloquées tant que le sandboxing est indisponible, car le blo
     <value>Son</value>
   </data>
   <data name="SettingsRow_ScreenRec_Header.Text" xml:space="preserve">
-    <value>Autoriser l’enregistrement de l’écran</value>
+    <value>Autoriser la capture de l’écran</value>
   </data>
   <data name="SettingsRow_CamRec_Header.Text" xml:space="preserve">
-    <value>Autoriser l’enregistrement de la caméra</value>
+    <value>Autoriser la capture par la caméra</value>
+  </data>
+  <data name="SettingsRow_Location_Header.Text" xml:space="preserve">
+    <value>Autoriser l’accès à la localisation</value>
   </data>
   <data name="HubWindow_NavigationViewItem_Voice.Content" xml:space="preserve">
     <value>Voix et audio</value>
@@ -4017,6 +4038,9 @@ Les commandes sont bloquées tant que le sandboxing est indisponible, car le blo
   </data>
   <data name="SettingsRow_CamRec_Description.Text" xml:space="preserve">
     <value>Lets agents capture the camera via camera.* commands.</value>
+  </data>
+  <data name="SettingsRow_Location_Description.Text" xml:space="preserve">
+    <value>Permet aux agents de lire la localisation de l’appareil via les commandes location.*.</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsVoiceIdBox.PlaceholderText" xml:space="preserve">
     <value>e.g. 21m00Tcm4TlvDq8ikWAM</value>
@@ -7079,8 +7103,9 @@ Le binaire wxc-exec est introuvable. {1} S'il s'agit d'une build développeur, c
   <data name="LocalAi_Reason_UnknownModelName" xml:space="preserve"><value>Le modèle sélectionné</value></data>
   <data name="LocalAi_Reason_UnknownDriverVersion" xml:space="preserve"><value>inconnu</value></data>
   <data name="LocalAi_Reason_UnknownMemoryAmount" xml:space="preserve"><value>une quantité inconnue</value></data>
-  <data name="LocalAi_Reason_GigabytesFormat" xml:space="preserve"><value>{0:0.#} GB</value></data>
-  <data name="Onboarding_Welcome_LocalAiAvailableBadge.Text" xml:space="preserve"><value>IA locale disponible</value></data>
+  <data name="LocalAi_Reason_GigabytesFormat" xml:space="preserve"><value>{0:0.#} GiB</value></data>
+  <data name="Onboarding_Welcome_LocalAiAvailableBadge.Text" xml:space="preserve"><value>IA locale prise en charge</value></data>
+  <data name="Onboarding_Welcome_LocalAiAvailabilityDetail" xml:space="preserve"><value>Votre {0} peut exécuter l’IA locale sur ce PC.</value></data>
   <data name="Onboarding_LocalAi_WslConfigReadFailureReason" xml:space="preserve"><value>OpenClaw ne peut pas lire le fichier .wslconfig global en toute sécurité. Vérifiez que le fichier est valide et lisible, puis réessayez la configuration.</value></data>
   <data name="LocalAiPage_UnavailableProbeTitle" xml:space="preserve"><value>La disponibilité de l'IA locale n'a pas pu être vérifiée</value></data>
   <data name="LocalAiPage_CheckingTitle" xml:space="preserve"><value>Vérification de la disponibilité de l'IA locale</value></data>

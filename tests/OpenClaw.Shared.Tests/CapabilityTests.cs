@@ -3557,7 +3557,7 @@ public class LocationCapabilityTests
     public async Task Get_ReturnsLocation_WhenHandler()
     {
         var cap = new LocationCapability(NullLogger.Instance);
-        cap.GetRequested += (args) => Task.FromResult(new LocationResult
+        cap.GetRequested += (args, cancellationToken) => Task.FromResult(new LocationResult
         {
             Latitude = 47.6062,
             Longitude = -122.3321,
@@ -3584,7 +3584,7 @@ public class LocationCapabilityTests
     {
         var cap = new LocationCapability(NullLogger.Instance);
         LocationGetArgs? receivedArgs = null;
-        cap.GetRequested += (args) =>
+        cap.GetRequested += (args, cancellationToken) =>
         {
             receivedArgs = args;
             return Task.FromResult(new LocationResult
@@ -3613,7 +3613,7 @@ public class LocationCapabilityTests
     {
         var cap = new LocationCapability(NullLogger.Instance);
         LocationGetArgs? receivedArgs = null;
-        cap.GetRequested += (args) =>
+        cap.GetRequested += (args, cancellationToken) =>
         {
             receivedArgs = args;
             return Task.FromResult(new LocationResult
@@ -3634,7 +3634,7 @@ public class LocationCapabilityTests
     public async Task Get_ReturnsPermissionError_WhenUnauthorized()
     {
         var cap = new LocationCapability(NullLogger.Instance);
-        cap.GetRequested += (args) => throw new UnauthorizedAccessException("No permission");
+        cap.GetRequested += (args, cancellationToken) => throw new UnauthorizedAccessException("No permission");
 
         var req = new NodeInvokeRequest { Id = "loc5", Command = "location.get", Args = Parse("""{}""") };
         var res = await cap.ExecuteAsync(req);
@@ -3646,12 +3646,35 @@ public class LocationCapabilityTests
     public async Task Get_ReturnsError_WhenHandlerThrows()
     {
         var cap = new LocationCapability(NullLogger.Instance);
-        cap.GetRequested += (args) => throw new InvalidOperationException("GPS unavailable");
+        cap.GetRequested += (args, cancellationToken) => throw new InvalidOperationException("GPS unavailable");
 
         var req = new NodeInvokeRequest { Id = "loc6", Command = "location.get", Args = Parse("""{}""") };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
         Assert.Equal("Location failed", res.Error);
+    }
+
+    [Fact]
+    public async Task Get_ReturnsCancelled_AndPassesCancellationToHandler()
+    {
+        var cap = new LocationCapability(NullLogger.Instance);
+        using var cancellation = new CancellationTokenSource();
+        CancellationToken receivedToken = default;
+        cap.GetRequested += async (args, cancellationToken) =>
+        {
+            receivedToken = cancellationToken;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new LocationResult();
+        };
+
+        var req = new NodeInvokeRequest { Id = "loc-cancel", Command = "location.get", Args = Parse("""{}""") };
+        var execution = cap.ExecuteAsync(req, cancellation.Token);
+        cancellation.Cancel();
+
+        var res = await execution;
+        Assert.False(res.Ok);
+        Assert.Equal("cancelled", res.Error);
+        Assert.Equal(cancellation.Token, receivedToken);
     }
 
     [Fact]

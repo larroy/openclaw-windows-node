@@ -171,6 +171,7 @@ internal sealed class SettingsStore : ISettingsStore
         TtsElevenLabsVoiceId = _settings.TtsElevenLabsVoiceId,
         ScreenRecordingConsentGiven = _settings.ScreenRecordingConsentGiven,
         CameraRecordingConsentGiven = _settings.CameraRecordingConsentGiven,
+        LocationConsentGiven = _settings.LocationConsentGiven,
         ShowChatToolCalls = _settings.ShowChatToolCalls,
     };
 
@@ -213,6 +214,7 @@ internal sealed class SettingsStore : ISettingsStore
         public bool NodeOllamaInferenceEnabled { set => _settings.NodeOllamaInferenceEnabled = value; }
         public bool ScreenRecordingConsentGiven { set => _settings.ScreenRecordingConsentGiven = value; }
         public bool CameraRecordingConsentGiven { set => _settings.CameraRecordingConsentGiven = value; }
+        public bool LocationConsentGiven { set => _settings.LocationConsentGiven = value; }
         public bool VoiceTtsEnabled { set => _settings.VoiceTtsEnabled = value; }
         public bool ShowChatToolCalls { set => _settings.ShowChatToolCalls = value; }
     }

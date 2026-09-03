@@ -95,6 +95,7 @@ public interface ISettingsEditor
 
     bool ScreenRecordingConsentGiven { set; }
     bool CameraRecordingConsentGiven { set; }
+    bool LocationConsentGiven { set; }
     bool VoiceTtsEnabled { set; }
     bool ShowChatToolCalls { set; }
 }
@@ -144,6 +145,7 @@ public sealed record SettingsSnapshot
 
     public bool ScreenRecordingConsentGiven { get; init; }
     public bool CameraRecordingConsentGiven { get; init; }
+    public bool LocationConsentGiven { get; init; }
 
     public bool ShowChatToolCalls { get; init; }
 }

@@ -136,7 +136,7 @@
                 <InfoBar x:Name="NodeModeBanner"
                          IsOpen="True" IsClosable="False" Severity="Informational"
                          Title="Node mode enabled"
-                         Message="This PC will operate as a remote compute node. The gateway can invoke screen capture, camera, and system commands on this machine." />
+                         Message="The gateway can use this PC for screen capture, camera, and system commands." />
 
                 <Border x:Name="StartupRow"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

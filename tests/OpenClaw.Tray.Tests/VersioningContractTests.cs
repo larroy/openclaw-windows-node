@@ -66,7 +66,7 @@ public sealed class VersioningContractTests
         Assert.Contains("versionSpec: '6.8.x'", workflow);
         Assert.DoesNotContain("versionSpec: '6.4.x'", workflow);
         Assert.Contains(
-            "'^(?<base>(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*))-(?<revision>[1-9]\\d*)$'",
+            "'^(?<base>(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*))-(?<revision>\\d+)$'",
             workflow);
         Assert.Contains("$semVer = $tagVersion", workflow);
         Assert.Contains("$isPrerelease = $false", workflow);
@@ -127,6 +127,72 @@ public sealed class VersioningContractTests
         Assert.Contains(
             "$trayPublishArgs += \"-p:InformationalVersion=$PublishVersion\"",
             buildScript);
+    }
+
+    [Fact]
+    public void StableCorrectionValidator_HasNoUpstreamReleaseApiDependency()
+    {
+        var repoRoot = TestRepositoryPaths.GetRepositoryRoot();
+        var validator = File.ReadAllText(Path.Combine(
+            repoRoot,
+            "scripts",
+            "Test-OpenClawStableCorrectionRelease.ps1"));
+
+        Assert.DoesNotContain("repos/openclaw/openclaw/", validator);
+        Assert.DoesNotContain("releases/tags/$Tag", validator);
+        Assert.Contains(
+            "repos/openclaw/openclaw-windows-node/releases/latest",
+            validator);
+        Assert.Contains("[string]$CurrentWindowsTag", validator);
+    }
+
+    [Fact]
+    public void StableCorrectionValidator_RequiresSameLineMonotonicCorrection()
+    {
+        var repoRoot = TestRepositoryPaths.GetRepositoryRoot();
+        var validator = File.ReadAllText(Path.Combine(
+            repoRoot,
+            "scripts",
+            "Test-OpenClawStableCorrectionRelease.ps1"));
+
+        Assert.Contains(
+            "'^v(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)-[1-9]\\d*$'",
+            validator);
+        Assert.Contains("function Assert-SameLineStableCorrection", validator);
+        Assert.Contains("if ($candidateBase -ne $currentBase)", validator);
+        Assert.Contains("if ($candidateParts[3] -eq $currentParts[3])", validator);
+        Assert.Contains("if ($candidateParts[3] -lt $currentParts[3])", validator);
+        Assert.Contains("must never be moved or reused", validator);
+        Assert.Contains("function Assert-WindowsReleaseTagUnpublished", validator);
+        Assert.Contains("is already a published Windows release", validator);
+        Assert.Contains("is a prerelease; refusing to order a correction against it", validator);
+        Assert.DoesNotContain("function Assert-NewerStableRelease", validator);
+    }
+
+    [Fact]
+    public void ReleaseWorkflow_RevalidatesCorrectionOrderingAfterSigningBeforePublish()
+    {
+        var repoRoot = TestRepositoryPaths.GetRepositoryRoot();
+        var workflow = File.ReadAllText(
+            Path.Combine(repoRoot, ".github", "workflows", "ci.yml"));
+
+        var signIndex = workflow.IndexOf("- name: Sign Installers", StringComparison.Ordinal);
+        var revalidateIndex = workflow.IndexOf(
+            "- name: Revalidate stable correction release ordering",
+            StringComparison.Ordinal);
+        var publishIndex = workflow.IndexOf("- name: Create Release", StringComparison.Ordinal);
+
+        Assert.True(signIndex >= 0, "Release workflow must sign installers.");
+        Assert.True(revalidateIndex > signIndex, "Correction ordering must be revalidated after signing.");
+        Assert.True(publishIndex > revalidateIndex, "Correction ordering must be revalidated before publication.");
+
+        Assert.Contains(
+            "make_latest: ${{ needs.test.outputs.isPrerelease == 'true' && 'false' || 'true' }}",
+            workflow);
+        Assert.Contains("$majorMinorPatch = $validation.BaseVersion", workflow);
+        Assert.Contains(
+            "./scripts/test-stable-correction-release-validator.ps1",
+            workflow);
     }
 
     [Fact]

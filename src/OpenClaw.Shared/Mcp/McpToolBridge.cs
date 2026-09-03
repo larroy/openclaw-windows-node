@@ -325,7 +325,7 @@ public class McpToolBridge
         // No screen.list or screen.capture exist in the protocol; previous
         // drift advertised tools that didn't actually resolve.
         ["screen.snapshot"] =
-            "Capture a screenshot of the specified display. Args: format ('png'|'jpeg', default 'png'), maxWidth (int, default 1920), quality (int 1-100, default 80), monitor / screenIndex (int, default 0 = primary), includePointer (bool, default true). Returns { format, width, height, base64, image } where image is a data: URL.",
+            "Capture a screenshot of the specified display. The first use requires remembered user consent, and every invocation shows a visible notification before capture. Args: format ('png'|'jpeg', default 'png'), maxWidth (int, default 1920), quality (int 1-100, default 80), monitor / screenIndex (int, default 0 = primary), includePointer (bool, default true). Returns { format, width, height, base64, image } where image is a data: URL.",
         ["screen.record"] =
             "Record the specified display for a bounded duration. Args: durationMs (int, required, max 300000), format ('mp4'|'webm', default 'mp4'), monitor / screenIndex (int, default 0 = primary), maxWidth (int, default 1920), fps (int, default 30). Returns { format, durationMs, base64 }.",
 
@@ -333,7 +333,7 @@ public class McpToolBridge
         ["camera.list"] =
             "List cameras attached to the Windows node. Returns { cameras: [{ deviceId, name, isDefault }, ...] }.",
         ["camera.snap"] =
-            "Capture a still photo from a camera. Args: deviceId (string, optional — defaults to system default camera), format ('jpeg'|'png', default 'jpeg'), maxWidth (int, default 1280), quality (int 1-100, default 80). Returns { format, width, height, base64 }.",
+            "Capture a still photo from a camera. The first use requires remembered user consent, and every invocation shows a visible notification before capture. Args: deviceId (string, optional; defaults to system default camera), format ('jpeg'|'png', default 'jpeg'), maxWidth (int, default 1280), quality (int 1-100, default 80). Returns { format, width, height, base64 }.",
         ["camera.clip"] =
             "Record a short clip from a camera. Args: deviceId (string, optional), durationMs (int, required, max 60000), format ('mp4'|'webm', default 'mp4'), maxWidth (int, default 1280). Returns { format, durationMs, base64 }.",
 
@@ -416,7 +416,7 @@ public class McpToolBridge
 
         // location.*
         ["location.get"] =
-            "Get the current device location via Windows.Devices.Geolocation. Args: accuracy ('default'|'high', optional, default 'default'), maxAge (int ms, optional, default 30000 — return a cached fix if it is younger than this), locationTimeout (int ms, optional, default 10000). Returns { latitude, longitude, accuracy (meters), timestamp (ms since epoch) }. Requires Location capability to be enabled and the user to have granted location permission to the app.",
+            "Get the current device location via Windows.Devices.Geolocation. The first use requires remembered user consent, and every invocation shows a visible notification before location access. Args: accuracy ('default'|'high', optional, default 'default'), maxAge (int ms, optional, default 30000; return a cached fix if it is younger than this), locationTimeout (int ms, optional, default 10000). Returns { latitude, longitude, accuracy (meters), timestamp (ms since epoch) }. Requires Location capability to be enabled and the user to have granted location permission to the app.",
 
         // device.*
         ["device.info"] =

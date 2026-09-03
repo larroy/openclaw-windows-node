@@ -37,6 +37,7 @@ public class SettingsRoundTripTests
             ScreenRecordingConsentGiven = true,
             CameraRecordingConsentGiven = true,
             NodeLocationEnabled = true,
+            LocationConsentGiven = true,
             NodeBrowserProxyEnabled = false,
             NodeOllamaInferenceEnabled = true,
             NodeSttEnabled = true,
@@ -107,6 +108,7 @@ public class SettingsRoundTripTests
         Assert.Equal(original.ScreenRecordingConsentGiven, restored.ScreenRecordingConsentGiven);
         Assert.Equal(original.CameraRecordingConsentGiven, restored.CameraRecordingConsentGiven);
         Assert.Equal(original.NodeLocationEnabled, restored.NodeLocationEnabled);
+        Assert.Equal(original.LocationConsentGiven, restored.LocationConsentGiven);
         Assert.Equal(original.NodeBrowserProxyEnabled, restored.NodeBrowserProxyEnabled);
         Assert.Equal(original.NodeOllamaInferenceEnabled, restored.NodeOllamaInferenceEnabled);
         Assert.Equal(original.NodeSttEnabled, restored.NodeSttEnabled);
@@ -193,6 +195,7 @@ public class SettingsRoundTripTests
         Assert.False(settings.ScreenRecordingConsentGiven);
         Assert.False(settings.CameraRecordingConsentGiven);
         Assert.True(settings.NodeLocationEnabled);
+        Assert.False(settings.LocationConsentGiven);
         Assert.True(settings.NodeBrowserProxyEnabled);
         Assert.False(settings.NodeOllamaInferenceEnabled);
         Assert.False(settings.NodeSttEnabled);
