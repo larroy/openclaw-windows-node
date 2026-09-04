@@ -9,8 +9,27 @@ using System.Text.Json.Nodes;
 
 namespace OpenClaw.Connection.Tests;
 
-public sealed class LocalAiPortLifecycleTests
+/// <summary>
+/// Every test in this class runs against an isolated, per-test Hugging Face hub cache.
+/// Without the class-level override the manifest paths would resolve into the developer's
+/// real <c>~/.cache/huggingface/hub</c> -- which on a machine that has actually run Local
+/// AI holds the very repository these manifests name.
+/// </summary>
+[Collection(EnvironmentVariableCollection.Name)]
+public sealed class LocalAiPortLifecycleTests : IDisposable
 {
+    private readonly TempDirectory _hubCache = new("local-ai-hub-cache-");
+    private readonly EnvironmentScope _hubCacheScope;
+
+    public LocalAiPortLifecycleTests() =>
+        _hubCacheScope = new EnvironmentScope("HF_HUB_CACHE", _hubCache.Path);
+
+    public void Dispose()
+    {
+        _hubCacheScope.Dispose();
+        _hubCache.Dispose();
+    }
+
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]
@@ -46,7 +65,7 @@ public sealed class LocalAiPortLifecycleTests
         Assert.Equal("openai/gpt-5", saved.Manifest.GatewayFallbackModel);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public async Task Manifest_RoundTripsStandardHubSnapshotSymlink()
     {
         using var temp = new TempDirectory("local-ai-manifest-link-");
@@ -61,12 +80,9 @@ public sealed class LocalAiPortLifecycleTests
         Directory.CreateDirectory(blobsDirectory);
         Directory.CreateDirectory(snapshotDirectory);
         await File.WriteAllTextAsync(blobPath, "verified model");
-        if (!TryCreateSymbolicLink(
-                manifest.ModelPath,
-                Path.GetRelativePath(snapshotDirectory, blobPath)))
-        {
-            return;
-        }
+        SymbolicLinkSupport.CreateSymbolicLink(
+            manifest.ModelPath,
+            Path.GetRelativePath(snapshotDirectory, blobPath));
 
         var store = new LocalAiManifestStore(new LocalAiPaths(temp.Path));
         await store.SaveAsync(manifest);
@@ -890,6 +906,7 @@ public sealed class LocalAiPortLifecycleTests
                 Sha256 = artifact.Sha256.Value,
             }).ToImmutableArray(),
             ModelPath = modelPath,
+            ModelCacheRoot = cacheRoot,
             ModelId = $"{repositoryId}@{revisionSha}",
             ModelAlias = "qwen3.6-35b-a3b-mtp-q4-k-m",
             ModelAsset = new LocalAiAssetReceipt
@@ -908,20 +925,6 @@ public sealed class LocalAiPortLifecycleTests
             DraftValueCachePrecision = KvCachePrecision.Q8_0,
             InstalledAtUtc = DateTimeOffset.Parse("2026-08-18T12:00:00Z"),
         };
-    }
-
-    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
-    {
-        try
-        {
-            File.CreateSymbolicLink(linkPath, targetPath);
-            return true;
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return false;
-        }
     }
 
     private sealed class FakePlatform : ILlamaServerRuntimePlatform

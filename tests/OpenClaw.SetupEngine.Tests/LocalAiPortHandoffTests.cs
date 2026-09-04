@@ -210,7 +210,7 @@ public sealed class LocalAiPortHandoffTests
             out string modelPath,
             out _,
             out string error), error);
-        return new(modelPath, HuggingFaceModelInstallDisposition.Downloaded, CreatedThisRun: true);
+        return new(modelPath, cacheRoot, HuggingFaceModelInstallDisposition.Downloaded, CreatedThisRun: true);
     }
 
     private sealed class FakeHardwareProbe(HostHardwareInfo hardware) : IHostHardwareProbe
