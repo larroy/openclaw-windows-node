@@ -44,7 +44,7 @@ public interface ILlamaServerInferenceClient : IDisposable
 /// Prompt and response content are never returned or logged, except llama-server's
 /// own error text on a failed request.
 /// </summary>
-public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
+public sealed partial class LlamaServerInferenceClient : ILlamaServerInferenceClient
 {
     private const int MaximumResponseBytes = 1024 * 1024;
     private const int MaximumErrorBytes = 8 * 1024;
@@ -282,6 +282,8 @@ public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
     {
         if (string.IsNullOrWhiteSpace(value))
             return null;
+        if (VerbosePayloadRecordPattern().IsMatch(value))
+            return null;
 
         value = TokenSanitizer.SanitizeLogMessage(value);
         var builder = new StringBuilder(value.Length);
@@ -305,6 +307,12 @@ public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
 
         return builder.Length == 0 ? null : builder.ToString();
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"(?:\blog_server_[a-z_]*|\brequest|\bresponse)\s*:",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex VerbosePayloadRecordPattern();
 
     private static async Task<byte[]> ReadBoundedAsync(
         HttpContent content,

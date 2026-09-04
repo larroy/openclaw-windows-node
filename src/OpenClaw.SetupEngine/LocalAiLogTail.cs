@@ -90,7 +90,7 @@ internal static partial class LocalAiLogTail
                 RequestOrResponsePattern().IsMatch(line) ||
                 !DiagnosticPattern().IsMatch(line))
                 continue;
-            line = TokenSanitizer.SanitizeLogMessage(line);
+            line = NormalizeSingleLine(TokenSanitizer.SanitizeLogMessage(line));
             if (line.Length > MaximumDiagnosticLineLength)
                 line = line[..MaximumDiagnosticLineLength];
             if (seen.Add(line))
@@ -102,8 +102,29 @@ internal static partial class LocalAiLogTail
             : matches[^maximumLines..];
     }
 
+    private static string NormalizeSingleLine(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        bool pendingSpace = false;
+        foreach (char character in value)
+        {
+            if (char.IsControl(character) || char.IsSeparator(character))
+            {
+                pendingSpace = builder.Length > 0;
+                continue;
+            }
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+            builder.Append(character);
+        }
+        return builder.ToString();
+    }
+
     [GeneratedRegex(
-        @"CUDA error|cudaError|exited with status|failed to load|failed to allocate|out of memory",
+        @"CUDA error|cudaError|exited with status|failed to load|failed to allocate|out of memory|error loading model|unable to load model",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DiagnosticPattern();
 

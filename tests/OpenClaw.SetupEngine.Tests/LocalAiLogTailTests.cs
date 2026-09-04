@@ -59,12 +59,14 @@ public sealed class LocalAiLogTailTests
         """;
 
     private const string VerboseRequestResponseLog =
-        """
-        srv  log_server_r: request: {"messages":[{"role":"user","content":"SENTINEL-PROMPT error: failed to load"}]}
-        srv  log_server_r: response: {"choices":[{"message":{"content":"SENTINEL-ASSISTANT CUDA error"}}]}
-        [54881] CUDA error: Authorization: Bearer test-secret-value
-        srv    operator(): instance name=qwen3.6-27b-mtp-q4-k-m exited with status -1073740791
-        """;
+        "srv  log_server_r: request: {\"messages\":[{\"role\":\"user\",\"content\":\"SENTINEL-PROMPT error: failed to load\"}]}\n" +
+        "srv  log_server_r: response: {\"choices\":[{\"message\":{\"content\":\"SENTINEL-ASSISTANT CUDA error\"}}]}\n" +
+        "[54881] CUDA error: Authorization: Bearer credential-sentinel-12345\n" +
+        "[54881] cudaError: allocation failed\u2028retry disabled\n" +
+        "srv    operator(): instance name=qwen3.6-27b-mtp-q4-k-m exited with status -1073740791";
+
+    private const string ModelFormatFailureLog =
+        "llama_model_load: error loading model architecture: unknown model architecture";
 
     [Fact]
     public void ExtractDiagnosticLines_ReturnsCudaAndExitStatusLines()
@@ -106,9 +108,19 @@ public sealed class LocalAiLogTailTests
 
         Assert.DoesNotContain(lines, line => line.Contains("SENTINEL-PROMPT", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, line => line.Contains("SENTINEL-ASSISTANT", StringComparison.Ordinal));
-        Assert.DoesNotContain(lines, line => line.Contains("test-secret-value", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("credential-sentinel-12345", StringComparison.Ordinal));
         Assert.Contains(lines, line => line.Contains("Authorization: [REDACTED]", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("allocation failed retry disabled", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains('\u2028'));
         Assert.Contains(lines, line => line.Contains("exited with status", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExtractDiagnosticLines_ReturnsModelFormatFailure()
+    {
+        IReadOnlyList<string> lines = LocalAiLogTail.ExtractDiagnosticLines(ModelFormatFailureLog);
+
+        Assert.Contains(lines, line => line.Contains("error loading model", StringComparison.Ordinal));
     }
 
     [Fact]

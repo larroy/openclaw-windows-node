@@ -63,6 +63,32 @@ public sealed class LlamaServerInferenceClientTests
         Assert.DoesNotContain('\u2029', failure.Message);
     }
 
+    [Fact]
+    public async Task VerifyAsync_RejectsVerbosePayloadRecordInsideRecognizedError()
+    {
+        const string sentinel = "SENTINEL-PROMPT-CONTENT";
+        string payload = JsonSerializer.Serialize(new
+        {
+            error = new
+            {
+                message = $"log_server_r: request: {{\"content\":\"{sentinel}\"}}",
+            },
+        });
+        using var client = new LlamaServerInferenceClient(
+            new DelegateHandler((_, _) => Task.FromResult(
+                Response(HttpStatusCode.InternalServerError, payload))));
+
+        LlamaServerInferenceException failure =
+            await Assert.ThrowsAsync<LlamaServerInferenceException>(
+                () => client.VerifyAsync(s_endpoint, ModelAlias));
+
+        Assert.Null(failure.ServerError);
+        Assert.Equal(
+            "llama-server inference returned HTTP 500 (InternalServerError).",
+            failure.Message);
+        Assert.DoesNotContain(sentinel, failure.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Security-boundary regression: a body that is not llama-server's recognized
     /// <c>{"error": ...}</c> shape — HTML, malformed JSON, or JSON with a different shape — must
