@@ -435,7 +435,9 @@ public sealed class AcquireLocalAiModelStep : SetupStep
             var progress = new SynchronousProgress<HuggingFaceModelInstallProgress>(value =>
                 ctx.DetailProgress?.Report(new SetupDetailProgressEvent(
                     Id,
-                    $"Downloading {plan.Model.Weights.RelativePath}",
+                    value.Phase == HuggingFaceModelInstallPhase.Verifying
+                        ? $"Verifying {plan.Model.Weights.RelativePath}"
+                        : $"Downloading {plan.Model.Weights.RelativePath}",
                     value.CompletedBytes,
                     value.TotalBytes,
                     SetupDetailProgressUnit.Bytes)));
@@ -547,6 +549,7 @@ public sealed class PersistLocalAiManifestStep : SetupStep
             ExecutablePath = Path.GetRelativePath(paths.RootDirectory, runtimeInstall.ExecutablePath),
             RuntimeAssets = runtimeAssets,
             ModelPath = modelInstall.ModelPath,
+            ModelCacheRoot = modelInstall.CacheRoot,
             ModelId = $"{modelSource.RepositoryId}@{modelSource.RevisionSha}",
             ModelAlias = plan.Model.Id,
             ModelAsset = new LocalAiAssetReceipt

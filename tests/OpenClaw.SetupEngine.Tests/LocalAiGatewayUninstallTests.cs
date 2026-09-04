@@ -180,6 +180,7 @@ public sealed class LocalAiGatewayUninstallTests
                     },
                 ],
                 ModelPath = modelPath,
+                ModelCacheRoot = Path.Combine(localDataDirectory, "hf-cache"),
                 ModelId = $"{repositoryId}@{revision}",
                 ModelAlias = LocalModelCatalog.Qwen35BModelId,
                 ModelAsset = new LocalAiAssetReceipt

@@ -143,6 +143,13 @@ public sealed record LocalAiInstallManifest
     /// be reused across installs and by other Hugging-Face-cache-aware tools.
     /// </summary>
     public required string ModelPath { get; init; }
+    /// <summary>
+    /// The hub cache root <see cref="ModelPath"/> was installed into. Recorded so the
+    /// installation stays valid when the ambient <c>HF_HUB_CACHE</c>/<c>HF_HOME</c>
+    /// environment later changes: validation contains the model path within this
+    /// recorded root instead of whatever the current process happens to resolve.
+    /// </summary>
+    public required string ModelCacheRoot { get; init; }
     public required string ModelId { get; init; }
     public required string ModelAlias { get; init; }
     public required LocalAiAssetReceipt ModelAsset { get; init; }
@@ -371,8 +378,14 @@ public sealed class LocalAiManifestStore
         if (!string.Equals(Path.GetFileName(executable), "llama-server.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The managed local AI executable must be llama-server.exe.");
 
+        if (string.IsNullOrWhiteSpace(manifest.ModelCacheRoot) ||
+            !Path.IsPathFullyQualified(manifest.ModelCacheRoot))
+        {
+            throw new InvalidDataException(
+                "The local AI manifest must record a fully qualified Hugging Face hub cache root.");
+        }
         if (!HuggingFaceHubCache.TryValidateSnapshotReadPath(
-                HuggingFaceHubCache.ResolveCacheRoot(),
+                manifest.ModelCacheRoot,
                 manifest.ModelPath,
                 out string model,
                 out string modelPathError))

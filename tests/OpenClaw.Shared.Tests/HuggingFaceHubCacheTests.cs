@@ -181,7 +181,7 @@ public sealed class HuggingFaceHubCacheTests
         Assert.Contains("fully qualified", error, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryValidateSnapshotReadPath_AcceptsStandardRepositoryBlobSymlink()
     {
         using var temp = new TempDirectory();
@@ -193,8 +193,7 @@ public sealed class HuggingFaceHubCacheTests
         Directory.CreateDirectory(blobs);
         Directory.CreateDirectory(snapshot);
         File.WriteAllText(blob, "verified model");
-        if (!TryCreateSymbolicLink(pointer, Path.GetRelativePath(snapshot, blob)))
-            return;
+        SymbolicLinkSupport.CreateSymbolicLink(pointer, Path.GetRelativePath(snapshot, blob));
 
         bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
             temp.Path,
@@ -213,7 +212,7 @@ public sealed class HuggingFaceHubCacheTests
         Assert.Contains("reparse point", writeError, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryValidateSnapshotReadPath_RejectsSymlinkOutsideRepositoryBlobs()
     {
         using var temp = new TempDirectory();
@@ -226,8 +225,7 @@ public sealed class HuggingFaceHubCacheTests
         Directory.CreateDirectory(blobs);
         Directory.CreateDirectory(snapshot);
         File.WriteAllText(outsideModel, "untrusted model");
-        if (!TryCreateSymbolicLink(pointer, outsideModel))
-            return;
+        SymbolicLinkSupport.CreateSymbolicLink(pointer, outsideModel);
 
         bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
             temp.Path,
@@ -240,7 +238,7 @@ public sealed class HuggingFaceHubCacheTests
         Assert.Contains("outside the hub cache root", error, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryValidateSnapshotReadPath_RejectsSymlinkIntoSiblingRepositoryBlobs()
     {
         using var temp = new TempDirectory();
@@ -254,8 +252,7 @@ public sealed class HuggingFaceHubCacheTests
         Directory.CreateDirectory(snapshot);
         Directory.CreateDirectory(siblingBlobs);
         File.WriteAllText(siblingBlob, "wrong repository");
-        if (!TryCreateSymbolicLink(pointer, siblingBlob))
-            return;
+        SymbolicLinkSupport.CreateSymbolicLink(pointer, siblingBlob);
 
         bool readable = HuggingFaceHubCache.TryValidateSnapshotReadPath(
             temp.Path,
@@ -379,19 +376,5 @@ public sealed class HuggingFaceHubCacheTests
         Assert.Equal("verified model", File.ReadAllText(link));
         File.Delete(target);
         Assert.Equal("verified model", File.ReadAllText(link));
-    }
-
-    private static bool TryCreateSymbolicLink(string linkPath, string targetPath)
-    {
-        try
-        {
-            File.CreateSymbolicLink(linkPath, targetPath);
-            return true;
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return false;
-        }
     }
 }
