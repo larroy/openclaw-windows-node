@@ -115,6 +115,29 @@ public sealed class LocalAiPortHandoffTests
         Assert.Equal("GPU-a", launch.Environment["CUDA_VISIBLE_DEVICES"]);
     }
 
+    [Fact]
+    public async Task AcquireModelStep_RollbackKeepsVerifiedDownloadOnLaterStepFailure()
+    {
+        // Rollback of this step only ever runs after the model was already downloaded
+        // and digest-verified -- it fires when some *later*, unrelated step (e.g. GPU or
+        // inference verification) fails. Deleting a multi-gigabyte verified file at that
+        // point would force a needless re-download on retry, so it must be kept on disk.
+        using var temp = new TempDirectory("local-ai-handoff-");
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        SetupContext context = CreateContext(new LocalAiConfig { Enabled = true, Port = 0 }, temp.Path);
+        context.LocalAiEligibility = LocalInferenceEligibility.Evaluate(CreateSparkHardware());
+        HuggingFaceModelInstallResult install = ModelInstall(cacheRoot, context.LocalAiEligibility.Plan!.Model);
+        Directory.CreateDirectory(Path.GetDirectoryName(install.ModelPath)!);
+        await File.WriteAllTextAsync(install.ModelPath, "verified-model-bytes");
+        context.LocalAiModelInstall = install;
+
+        await new AcquireLocalAiModelStep().RollbackAsync(context, CancellationToken.None);
+
+        Assert.True(File.Exists(install.ModelPath));
+        Assert.Null(context.LocalAiModelInstall);
+    }
+
     private static SetupContext CreateContext(LocalAiConfig localAi, string? localDataDirectory = null)
     {
         var config = new SetupConfig { LocalAi = localAi };
