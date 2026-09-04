@@ -474,11 +474,15 @@ public sealed class AcquireLocalAiModelStep : SetupStep
     public override Task RollbackAsync(SetupContext ctx, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (ctx.LocalAiModelInstall is { } install)
-        {
-            _acquirer.RemoveInstalledModel(ctx.LocalDataDir, install);
+        // A model already recorded here has already been downloaded (or reused) and
+        // passed its pinned size/SHA-256 check: this step itself never sets
+        // LocalAiModelInstall on failure, so rollback only reaches this branch because a
+        // *later*, unrelated step failed (e.g. GPU/inference verification). Deleting a
+        // multi-gigabyte, digest-verified file at that point would force a needless
+        // re-download on retry, so it is left in the shared hub cache for the next run's
+        // reuse-by-digest check to pick back up. Only the context handoff is undone.
+        if (ctx.LocalAiModelInstall is not null)
             ctx.LocalAiModelInstall = null;
-        }
         if (ctx.LocalAiEligibility?.Plan is { } plan)
         {
             _acquirer.RemovePartialModel(
