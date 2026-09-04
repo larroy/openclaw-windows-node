@@ -224,6 +224,105 @@ public sealed class LocalAiInstallRecoveryTests
     }
 
     [Fact]
+    public async Task ModelInstall_ReusesVerifiedBlobFromOtherRevisionWithoutHttp()
+    {
+        using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        byte[] modelBytes = "verified-model"u8.ToArray();
+        LocalModelInfo model = CreateModel(modelBytes);
+        (string modelPath, _) = ResolveModelPaths(cacheRoot, model);
+        string repositoryDirectory = Directory.GetParent(
+            Directory.GetParent(Path.GetDirectoryName(modelPath)!)!.FullName)!.FullName;
+        string blobPath = Path.Combine(repositoryDirectory, "blobs", model.Weights.Sha256.Value);
+        Directory.CreateDirectory(Path.GetDirectoryName(blobPath)!);
+        await File.WriteAllBytesAsync(blobPath, modelBytes);
+        using var client = new HttpClient(new DelegateHandler(_ =>
+            throw new InvalidOperationException("HTTP must not be used when a pinned digest blob exists.")));
+
+        HuggingFaceModelInstallResult result = await new HuggingFaceModelInstaller(client).InstallAsync(
+            temp.Path,
+            TestComponent(),
+            model,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(HuggingFaceModelInstallDisposition.ReusedVerified, result.Disposition);
+        Assert.False(result.CreatedThisRun);
+        Assert.Equal(modelPath, result.ModelPath);
+        Assert.True(File.Exists(modelPath));
+        Assert.Equal(modelBytes, await File.ReadAllBytesAsync(modelPath));
+        Assert.True(File.Exists(blobPath));
+    }
+
+    [Fact]
+    public async Task ModelInstall_ReusesVerifiedSnapshotFromOtherRevisionWithoutHttp()
+    {
+        using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        byte[] modelBytes = "verified-model"u8.ToArray();
+        LocalModelInfo model = CreateModel(modelBytes);
+        (string modelPath, _) = ResolveModelPaths(cacheRoot, model);
+        string snapshotsDirectory = Path.Combine(
+            Directory.GetParent(
+                Directory.GetParent(Path.GetDirectoryName(modelPath)!)!.FullName)!.FullName,
+            "snapshots");
+        string otherSnapshot = Path.Combine(snapshotsDirectory, new string('c', 40), "model.gguf");
+        Directory.CreateDirectory(Path.GetDirectoryName(otherSnapshot)!);
+        await File.WriteAllBytesAsync(otherSnapshot, modelBytes);
+        using var client = new HttpClient(new DelegateHandler(_ =>
+            throw new InvalidOperationException("HTTP must not be used when another revision holds the model.")));
+
+        HuggingFaceModelInstallResult result = await new HuggingFaceModelInstaller(client).InstallAsync(
+            temp.Path,
+            TestComponent(),
+            model,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(HuggingFaceModelInstallDisposition.ReusedVerified, result.Disposition);
+        Assert.False(result.CreatedThisRun);
+        Assert.Equal(modelPath, result.ModelPath);
+        Assert.True(File.Exists(modelPath));
+        Assert.Equal(modelBytes, await File.ReadAllBytesAsync(modelPath));
+        Assert.True(File.Exists(otherSnapshot));
+    }
+
+    [Fact]
+    public async Task ModelInstall_IgnoresBlobWithWrongDigestAndDownloads()
+    {
+        using var temp = new TempDirectory();
+        string cacheRoot = Path.Combine(temp.Path, "hf-cache");
+        using var env = new EnvironmentScope("HF_HUB_CACHE", cacheRoot);
+        byte[] modelBytes = "verified-model"u8.ToArray();
+        LocalModelInfo model = CreateModel(modelBytes);
+        (string modelPath, _) = ResolveModelPaths(cacheRoot, model);
+        string repositoryDirectory = Directory.GetParent(
+            Directory.GetParent(Path.GetDirectoryName(modelPath)!)!.FullName)!.FullName;
+        string blobPath = Path.Combine(repositoryDirectory, "blobs", model.Weights.Sha256.Value);
+        Directory.CreateDirectory(Path.GetDirectoryName(blobPath)!);
+        await File.WriteAllBytesAsync(blobPath, "corrupted-model"u8.ToArray());
+        using var client = new HttpClient(new DelegateHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(modelBytes),
+        }));
+
+        HuggingFaceModelInstallResult result = await new HuggingFaceModelInstaller(client).InstallAsync(
+            temp.Path,
+            TestComponent(),
+            model,
+            progress: null,
+            CancellationToken.None);
+
+        // The stale blob is left untouched; the download is written at the pinned path.
+        Assert.Equal(HuggingFaceModelInstallDisposition.Downloaded, result.Disposition);
+        Assert.Equal(modelPath, result.ModelPath);
+        Assert.Equal(modelBytes, await File.ReadAllBytesAsync(modelPath));
+        Assert.Equal("corrupted-model"u8.ToArray(), await File.ReadAllBytesAsync(blobPath));
+    }
+
+    [Fact]
     public async Task RuntimeInstall_ReplacesExactUnclaimedCatalogDirectory()
     {
         using var temp = new TempDirectory();
