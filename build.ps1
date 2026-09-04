@@ -4,8 +4,9 @@
 
 .DESCRIPTION
     Builds all projects, checks prerequisites, and provides clear guidance.
+    Builds use MSBuild multi-proc (-m) so project references compile in
+    parallel across worker nodes.
 
-.PARAMETER Project
     Which project to build: All, Tray, WinUI, Shared, Cli, WinNodeCli, SetupEngine
     Default: All
 
@@ -360,7 +361,7 @@ function Build-Project($name, $path, $useRid = $false) {
         return $false
     }
     
-    $dotnetArgs = @("build", $path, "-c", $Configuration)
+    $dotnetArgs = @("build", $path, "-c", $Configuration, "-m")
     # WinUI requires runtime identifier for self-contained WebView2 support
     if ($useRid) {
         $dotnetArgs += @("-r", $rid)
@@ -420,7 +421,7 @@ $projects = @{
     "SetupEngine" = @{ Path = "src/OpenClaw.SetupEngine/OpenClaw.SetupEngine.csproj"; UseRid = $false }
 }
 
-$toBuild = if ($Project -eq "All") { @("Shared", "Cli", "WinNodeCli", "SetupEngine", "WinUI") } else { @($Project) }
+$toBuild = if ($Project -eq "All") { @("Shared", "WinUI", "Cli", "WinNodeCli", "SetupEngine") } else { @($Project) }
 
 # Always build Shared first if building other projects
 if ($Project -ne "Shared" -and $Project -ne "All" -and $toBuild -notcontains "Shared") {
