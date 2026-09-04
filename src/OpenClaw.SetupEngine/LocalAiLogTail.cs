@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using OpenClaw.Connection.LocalAi;
+using OpenClaw.Shared;
 
 namespace OpenClaw.SetupEngine;
 
@@ -85,8 +86,11 @@ internal static partial class LocalAiLogTail
         foreach (string rawLine in log.Split('\n'))
         {
             string line = rawLine.Trim();
-            if (line.Length == 0 || !DiagnosticPattern().IsMatch(line))
+            if (line.Length == 0 ||
+                RequestOrResponsePattern().IsMatch(line) ||
+                !DiagnosticPattern().IsMatch(line))
                 continue;
+            line = TokenSanitizer.SanitizeLogMessage(line);
             if (line.Length > MaximumDiagnosticLineLength)
                 line = line[..MaximumDiagnosticLineLength];
             if (seen.Add(line))
@@ -99,7 +103,12 @@ internal static partial class LocalAiLogTail
     }
 
     [GeneratedRegex(
-        @"CUDA error|cudaError|exited with status|failed to load|failed to allocate|out of memory|\berror\s*:",
+        @"CUDA error|cudaError|exited with status|failed to load|failed to allocate|out of memory",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DiagnosticPattern();
+
+    [GeneratedRegex(
+        @"(?:\blog_server_[a-z_]*|\brequest|\bresponse)\s*:",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RequestOrResponsePattern();
 }

@@ -155,6 +155,7 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
             new TransactionJournal(filePath: null),
             new CommandRunner(logger),
             CancellationToken.None,
+            dataDir: localDataDirectory,
             localDataDir: localDataDirectory);
     }
 

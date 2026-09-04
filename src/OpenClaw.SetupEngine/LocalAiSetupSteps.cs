@@ -844,8 +844,8 @@ public sealed class VerifyLocalAiInferenceStep : SetupStep
         IReadOnlyList<string> diagnostics =
             await LocalAiLogTail.ReadDiagnosticLinesAsync(paths, CancellationToken.None);
         await ResetRouterAsync(runtime);
-        // Echo into the setup log the UI already links, so the root cause survives the rollback
-        // that deletes the Local AI tree.
+        // Echo into the setup log the UI already links, so the root cause remains available if
+        // the router restart rotates the managed llama-server logs.
         foreach (string line in diagnostics)
             ctx.Logger.Warn($"llama-server: {line}");
         return new LocalAiFailureDetail(diagnostics, paths.LogsDirectory);

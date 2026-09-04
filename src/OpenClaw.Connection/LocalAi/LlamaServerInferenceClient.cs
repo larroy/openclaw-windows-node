@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using OpenClaw.Shared;
 
 namespace OpenClaw.Connection.LocalAi;
 
@@ -282,11 +283,12 @@ public sealed class LlamaServerInferenceClient : ILlamaServerInferenceClient
         if (string.IsNullOrWhiteSpace(value))
             return null;
 
+        value = TokenSanitizer.SanitizeLogMessage(value);
         var builder = new StringBuilder(value.Length);
         bool pendingSpace = false;
         foreach (char character in value)
         {
-            if (char.IsControl(character) || character == ' ')
+            if (char.IsControl(character) || char.IsSeparator(character))
             {
                 pendingSpace = builder.Length > 0;
                 continue;

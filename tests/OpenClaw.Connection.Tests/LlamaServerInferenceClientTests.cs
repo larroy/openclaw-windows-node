@@ -36,6 +36,33 @@ public sealed class LlamaServerInferenceClientTests
         Assert.Contains("failed to load", failure.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task VerifyAsync_RedactsAndNormalizesLlamaServerErrorBody()
+    {
+        const string secret = "test-secret-value";
+        string payload = JsonSerializer.Serialize(new
+        {
+            error = new
+            {
+                message = $"model failed\u2028Authorization: Bearer {secret}\u2029retry disabled",
+            },
+        });
+        using var client = new LlamaServerInferenceClient(
+            new DelegateHandler((_, _) => Task.FromResult(
+                Response(HttpStatusCode.InternalServerError, payload))));
+
+        LlamaServerInferenceException failure =
+            await Assert.ThrowsAsync<LlamaServerInferenceException>(
+                () => client.VerifyAsync(s_endpoint, ModelAlias));
+
+        Assert.Equal(
+            "model failed Authorization: [REDACTED]",
+            failure.ServerError);
+        Assert.DoesNotContain(secret, failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain('\u2028', failure.Message);
+        Assert.DoesNotContain('\u2029', failure.Message);
+    }
+
     /// <summary>
     /// Security-boundary regression: a body that is not llama-server's recognized
     /// <c>{"error": ...}</c> shape — HTML, malformed JSON, or JSON with a different shape — must

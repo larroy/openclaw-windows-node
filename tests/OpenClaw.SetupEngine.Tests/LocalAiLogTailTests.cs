@@ -58,6 +58,14 @@ public sealed class LocalAiLogTailTests
         srv    operator(): instance name=qwen3.6-27b-mtp-q4-k-m exited with status -1073740791
         """;
 
+    private const string VerboseRequestResponseLog =
+        """
+        srv  log_server_r: request: {"messages":[{"role":"user","content":"SENTINEL-PROMPT error: failed to load"}]}
+        srv  log_server_r: response: {"choices":[{"message":{"content":"SENTINEL-ASSISTANT CUDA error"}}]}
+        [54881] CUDA error: Authorization: Bearer test-secret-value
+        srv    operator(): instance name=qwen3.6-27b-mtp-q4-k-m exited with status -1073740791
+        """;
+
     [Fact]
     public void ExtractDiagnosticLines_ReturnsCudaAndExitStatusLines()
     {
@@ -89,6 +97,18 @@ public sealed class LocalAiLogTailTests
     public void ExtractDiagnosticLines_IgnoresRoutineGgmlInitializationLines()
     {
         Assert.Empty(LocalAiLogTail.ExtractDiagnosticLines(BenignGgmlStartupLog));
+    }
+
+    [Fact]
+    public void ExtractDiagnosticLines_RejectsVerbosePayloadsAndRedactsAcceptedDiagnostics()
+    {
+        IReadOnlyList<string> lines = LocalAiLogTail.ExtractDiagnosticLines(VerboseRequestResponseLog);
+
+        Assert.DoesNotContain(lines, line => line.Contains("SENTINEL-PROMPT", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("SENTINEL-ASSISTANT", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.Contains("test-secret-value", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("Authorization: [REDACTED]", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("exited with status", StringComparison.Ordinal));
     }
 
     [Fact]

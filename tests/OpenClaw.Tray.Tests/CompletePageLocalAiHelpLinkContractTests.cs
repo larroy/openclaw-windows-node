@@ -43,15 +43,12 @@ public sealed class CompletePageLocalAiHelpLinkContractTests
     }
 
     /// <summary>
-    /// Correctness regression: the WinUI setup wizard defaults <c>RollbackOnFailure</c> to
-    /// <see langword="true"/> (<c>SetupContext.ApplyUiDefaults</c>), so a Local AI verification
-    /// failure deletes the whole Local AI tree — including the log directory this link points
-    /// to — before the completion page is shown. The link must not advertise a folder that no
-    /// longer exists; the diagnostic text above it remains accurate regardless, since it was
-    /// captured before the rollback.
+    /// The link must not advertise a folder that is unavailable because setup failed before log
+    /// initialization or because another cleanup removed it. The diagnostic text remains useful
+    /// because it was captured before the router restart.
     /// </summary>
     [Fact]
-    public void CompletePage_HidesServerLogLinkWhenDirectoryNoLongerExists()
+    public void CompletePage_HidesServerLogLinkWhenDirectoryIsUnavailable()
     {
         string root = TestRepositoryPaths.GetRepositoryRoot();
         string source = File.ReadAllText(Path.Combine(
