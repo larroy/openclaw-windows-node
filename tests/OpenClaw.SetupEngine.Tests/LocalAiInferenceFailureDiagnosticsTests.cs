@@ -140,7 +140,7 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
         SetupContext context = CreateContext(localDataDirectory);
         context.LocalAiEligibility = eligibility;
         context.LocalAiHardware = hardware;
-        context.LocalAiResolvedInstall = CreateInstall(localDataDirectory, model, endpoint);
+        context.LocalAiResolvedInstall = CreateInstall(localDataDirectory, model, endpoint, eligibility.Plan.Profile.ContextTokens);
         context.LocalAiRuntime = runtime;
         return (context, runtime);
     }
@@ -177,7 +177,8 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
     private static LocalAiResolvedInstall CreateInstall(
         string localDataDirectory,
         LocalModelInfo model,
-        Uri endpoint)
+        Uri endpoint,
+        int contextTokens)
     {
         string root = Path.Combine(localDataDirectory, "LocalAI");
         string executable = Path.Combine(root, "engines", "llama-server", "b10488", "win-arm64", "llama-server.exe");
@@ -203,8 +204,7 @@ public sealed class LocalAiInferenceFailureDiagnosticsTests
             ModelAlias = model.Id,
             ModelAsset = receipt with { FileName = Path.GetFileName(modelPath) },
             RequestedPort = 0,
-            Endpoint = endpoint.AbsoluteUri,
-            ContextLength = model.Recipe.ContextTokens,
+            ContextLength = contextTokens,
         };
         return new LocalAiResolvedInstall(manifest, executable, modelPath, endpoint);
     }
