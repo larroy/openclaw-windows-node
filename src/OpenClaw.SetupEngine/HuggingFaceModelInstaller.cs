@@ -160,6 +160,23 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
             throw new HuggingFaceModelInstallException(pathError);
         }
 
+        // A standard hub-cache download made by huggingface_hub, the hf CLI, or
+        // llama.cpp lands in the content-addressed blobs store or under another
+        // revision's snapshot. Reuse it instead of re-downloading when it
+        // matches the pinned size and SHA-256 digest exactly.
+        if (await TryReuseVerifiedCandidateAsync(
+                cacheRoot,
+                source,
+                model.Weights,
+                modelPath,
+                cancellationToken).ConfigureAwait(false))
+        {
+            return new HuggingFaceModelInstallResult(
+                modelPath,
+                HuggingFaceModelInstallDisposition.ReusedVerified,
+                CreatedThisRun: false);
+        }
+
         var promoted = false;
         var preservePartial = false;
         try
@@ -326,6 +343,55 @@ internal sealed class HuggingFaceModelInstaller : IHuggingFaceModelAcquirer
                 await _retryDelay(delay, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// Looks for the pinned model content outside the pinned revision's snapshot:
+    /// the content-addressed blob named by the pinned SHA-256 and same-named
+    /// snapshot entries in other revisions of the repository. A candidate is
+    /// accepted only after the standard snapshot-read validation (which accepts
+    /// the one snapshot-to-blob symlink layout and rejects anything else) plus the
+    /// pinned size and digest check. Accepted content is hardlinked into the
+    /// pinned snapshot path so the manifest keeps its canonical form and rollback
+    /// removes only the link, never the pre-existing blob.
+    /// </summary>
+    private static async Task<bool> TryReuseVerifiedCandidateAsync(
+        string cacheRoot,
+        HuggingFaceRevisionSource source,
+        PinnedArtifact artifact,
+        string modelPath,
+        CancellationToken cancellationToken)
+    {
+        if (!HuggingFaceHubCache.TryGetReuseCandidates(
+                cacheRoot,
+                source.RepositoryId,
+                Path.GetFileName(artifact.RelativePath),
+                artifact.Sha256,
+                out IReadOnlyList<string> candidates,
+                out _))
+        {
+            return false;
+        }
+
+        foreach (string candidate in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await VerifyFileAsync(candidate, artifact, cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+                    if (HuggingFaceHubCache.TryCreateHardLink(modelPath, candidate))
+                        return true;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                catch (NotSupportedException) { }
+                // A candidate that cannot be linked must not block the download path.
+            }
+        }
+
+        return false;
     }
 
     private async Task DownloadAndVerifyAttemptAsync(

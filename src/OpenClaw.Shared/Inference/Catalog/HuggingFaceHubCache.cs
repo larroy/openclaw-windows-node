@@ -126,6 +126,94 @@ public static class HuggingFaceHubCache
     }
 
     /// <summary>
+    /// Enumerates existing files that may already hold the pinned model content:
+    /// the content-addressed blob named by the pinned SHA-256 digest plus any
+    /// same-named snapshot entry across all revisions of the repository. Paths
+    /// are returned unresolved (snapshot entries may be standard blob symlinks)
+    /// and must pass <see cref="TryValidateSnapshotReadPath"/> plus the pinned
+    /// size and digest check before reuse.
+    /// </summary>
+    public static bool TryGetReuseCandidates(
+        string cacheRoot,
+        string repositoryId,
+        string fileName,
+        Sha256Digest pinnedSha256,
+        out IReadOnlyList<string> candidates,
+        out string error)
+    {
+        candidates = [];
+        error = "";
+
+        if (string.IsNullOrWhiteSpace(cacheRoot))
+        {
+            error = "The Hugging Face hub cache root is required.";
+            return false;
+        }
+
+        string[] repositorySegments = repositoryId?.Split('/') ?? [];
+        if (repositorySegments.Length != 2 ||
+            repositorySegments.Any(segment => !WindowsPathSafety.IsSafeSegment(segment)) ||
+            !WindowsPathSafety.IsSafeSegment(fileName) ||
+            !string.Equals(Path.GetExtension(fileName), ".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "The Hugging Face model identity contains an invalid path segment.";
+            return false;
+        }
+
+        string normalizedRoot;
+        string repositoryFolder;
+        try
+        {
+            normalizedRoot = WindowsPathSafety.NormalizePath(cacheRoot);
+            repositoryFolder = WindowsPathSafety.NormalizePath(Path.Combine(
+                normalizedRoot,
+                $"models--{repositorySegments[0]}--{repositorySegments[1]}"));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"Invalid Hugging Face hub cache path: {ex.Message}";
+            return false;
+        }
+
+        string pinnedDigest = pinnedSha256.Value;
+        var found = new List<string>();
+        try
+        {
+            string blobsDirectory = Path.Combine(repositoryFolder, "blobs");
+            if (Directory.Exists(blobsDirectory))
+            {
+                string blobPath = Path.Combine(blobsDirectory, pinnedDigest);
+                if (File.Exists(blobPath) &&
+                    WindowsPathSafety.IsStrictDescendant(blobPath, normalizedRoot))
+                {
+                    found.Add(WindowsPathSafety.NormalizePath(blobPath));
+                }
+            }
+
+            string snapshotsDirectory = Path.Combine(repositoryFolder, "snapshots");
+            if (Directory.Exists(snapshotsDirectory))
+            {
+                foreach (string revision in Directory.EnumerateDirectories(snapshotsDirectory))
+                {
+                    string candidate = Path.Combine(revision, fileName);
+                    if (File.Exists(candidate) &&
+                        WindowsPathSafety.IsStrictDescendant(candidate, normalizedRoot))
+                    {
+                        found.Add(WindowsPathSafety.NormalizePath(candidate));
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A unreadable sibling revision must not block reuse of another candidate.
+        }
+
+        candidates = found;
+        return true;
+    }
+
+    /// <summary>
     /// Validates a persisted or reusable snapshot path for reading. A regular file must
     /// resolve beneath the selected cache root. A symbolic-link snapshot is accepted
     /// only when its opened file handle resolves beneath the same repository's
@@ -385,6 +473,27 @@ public static class HuggingFaceHubCache
         error = "";
         return true;
     }
+
+    /// <summary>
+    /// Creates a hard link so the pinned snapshot path points at already-present
+    /// verified content (a hub blob or another revision's snapshot). Hard links
+    /// need no extra privilege, keep the content at its existing location, and
+    /// deleting the link later never removes the underlying content.
+    /// </summary>
+    public static bool TryCreateHardLink(string linkPath, string targetPath)
+    {
+        if (!OperatingSystem.IsWindows())
+            return false;
+
+        return CreateHardLinkW(linkPath, targetPath, IntPtr.Zero);
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(
+        string fileName,
+        string existingFileName,
+        IntPtr securityAttributes);
 
     private static bool TryGetRepositoryBlobsDirectory(
         string normalizedRoot,
