@@ -1,1 +1,3 @@
-Go read @AGENTS.md and load skills from .agents/skills
+@AGENTS.md
+
+Project skills are under `.agents/skills/`; load the relevant `SKILL.md` before using a skill.

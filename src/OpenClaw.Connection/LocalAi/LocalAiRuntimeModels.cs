@@ -9,7 +9,11 @@
 //   {
 //       LocalAiRuntimeSnapshot s = args.Snapshot;
 //       Log($"{s.State} ownership={s.Ownership} model={s.ModelId} at {s.Endpoint}");
-//       if (s.ModelEvidence.Availability is LocalAiModelAvailabilityState.Loaded) { /* ready */ }
+//       if (s.ModelEvidence.State is
+//           LocalAiModelAvailabilityState.Verified or LocalAiModelAvailabilityState.Loaded)
+//       {
+//           /* ready; Verified is the healthy lazy-unloaded state */
+//       }
 //   };
 using OpenClaw.Shared.Inference.Catalog;
 

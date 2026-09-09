@@ -2,6 +2,7 @@
 // Native Windows process host for managed local AI executables. Starts inference processes
 // inside a kill-on-close Job Object (no orphaned children), reports exits, and captures
 // stdout/stderr into bounded, sanitized, rotating log files (BoundedRotatingLogWriter).
+// These types are internal infrastructure owned by LlamaServerRuntimeService.
 // </summary>
 // Usage:
 //   ILocalAiManagedProcessHost host = new WindowsLocalAiManagedProcessHost(logger);

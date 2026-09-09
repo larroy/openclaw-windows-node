@@ -6,11 +6,15 @@
 // Usage:
 //   using var client = new LlamaServerClient();
 //   LlamaServerRouterProbeResult probe = await client.ProbeManagedModelAsync(
-//       endpoint: new Uri("http://127.0.0.1:18803"),
+//       endpoint: new Uri("http://127.0.0.1:18803/v1"),
 //       modelAlias: "local-model",
 //       expectedModelPath: install.ModelPath,
 //       cancellationToken);
-//   if (probe.IsReadyForManagedModel(install.ModelPath)) { /* router is healthy and serving the model */ }
+//   if (probe.IsHealthy &&
+//       probe.ModelState is LocalAiModelAvailabilityState.Verified or LocalAiModelAvailabilityState.Loaded)
+//   {
+//       // The public probe evidence is ready; the runtime service also validates the exact model path.
+//   }
 // </summary>
 using System.Text.Json;
 

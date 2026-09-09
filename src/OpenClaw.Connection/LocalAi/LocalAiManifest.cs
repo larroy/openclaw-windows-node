@@ -8,9 +8,10 @@
 //   var paths = new LocalAiPaths(localDataDirectory);
 //   paths.EnsureDirectories();
 //   var store = new LocalAiManifestStore(paths);
-//   LocalAiResolvedInstall? install = await store.LoadAsync(cancellationToken); // null = not installed
+//   // null means no receipt; corrupt or unsupported receipts throw InvalidDataException.
+//   LocalAiResolvedInstall? install = await store.LoadAsync(cancellationToken);
 //   await store.SaveAsync(manifest, cancellationToken); // atomic manifest replacement
-//   string contained = paths.ResolveContainedPath("models/model.gguf", nameof(path)); // traversal-safe
+//   string contained = paths.ResolveContainedPath("models/model.gguf", "modelPath"); // traversal-safe
 // </summary>
 using System.Collections.Immutable;
 using System.Text.Json;
