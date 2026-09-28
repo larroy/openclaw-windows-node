@@ -11,6 +11,7 @@ using OpenClaw.TestSupport;
 
 namespace OpenClaw.SetupEngine.Tests;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class LocalAiInstallRecoveryTests
 {
     [Fact]
@@ -967,6 +968,9 @@ public sealed class LocalAiInstallRecoveryTests
     public async Task Reconciler_ReusesOnlyMatchingManifestWithoutMutation()
     {
         using var temp = new TempDirectory();
+        using var environment = new EnvironmentScope(
+            "HF_HUB_CACHE",
+            CacheRoot(temp.Path));
         LocalInferencePlan plan = CatalogPlan();
         const string gpuId = "GPU-0";
         LocalAiInstallManifest manifest = CreateManifest(temp.Path, plan, gpuId);
