@@ -393,7 +393,7 @@ successful runtime install, entries for the current pins are kept along with
 the 3 most recently used older runtime sets; older entries are deleted. A set is
 every archive a runtime install pinned together (the llama.cpp binary zip and
 its CUDA dependency zip), so pruning never keeps half of an older runtime. Set
-`OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS` to a non-negative integer to
+`OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS` to a non-negative integer to
 change the number of older sets kept (`0` keeps only the current pins); other
 values are ignored with a warning. Uninstall keeps the cache, which is bounded
 by this retention and logged with its path so users can delete it to reclaim

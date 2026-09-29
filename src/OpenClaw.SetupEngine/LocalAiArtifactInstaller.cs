@@ -21,7 +21,7 @@
 //      full SHA-256 check over the same open handle that extraction reads.
 //      Stale cache entries are pruned, keeping the current pins plus the
 //      three most recently used older runtime sets (override the count with
-//      OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS; 0 keeps only the current
+//      OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS; 0 keeps only the current
 //      pins). Set the environment variable
 //      OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE to skip all cache reads,
 //      writes, and pruning.
@@ -163,7 +163,7 @@ internal sealed class LocalAiArtifactInstallException : Exception
 internal sealed class LocalAiArtifactInstaller
 {
     internal const string DisableArchiveCacheEnvironmentVariable = "OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE";
-    internal const string RetainedArchiveSetsEnvironmentVariable = "OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS";
+    internal const string RetainedArchiveSetsEnvironmentVariable = "OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS";
     internal const int DefaultRetainedStaleArchiveSets = 3;
     private const int DownloadBufferSize = 128 * 1024;
     private const int DownloadProgressIntervalBytes = 4 * 1024 * 1024;

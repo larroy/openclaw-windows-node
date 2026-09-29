@@ -790,9 +790,11 @@ public sealed class PersistLocalAiManifestStep : SetupStep
                 LocalAiPathPolicy.ArchiveCacheDirectoryName);
             if (Directory.Exists(cacheRoot))
             {
+                int retainedSets = LocalAiArtifactInstaller.ParseRetainedArchiveSets(
+                    Environment.GetEnvironmentVariable(LocalAiArtifactInstaller.RetainedArchiveSetsEnvironmentVariable));
                 ctx.Logger.Info(
                     $"Kept the verified Local AI download cache at '{cacheRoot}' for faster reinstalls. " +
-                    $"It holds the current runtime plus at most {LocalAiArtifactInstaller.DefaultRetainedStaleArchiveSets} " +
+                    $"It holds the current runtime plus at most {retainedSets} " +
                     $"older runtime sets (set {LocalAiArtifactInstaller.RetainedArchiveSetsEnvironmentVariable} to change this). " +
                     "Delete this folder to reclaim disk space.");
             }

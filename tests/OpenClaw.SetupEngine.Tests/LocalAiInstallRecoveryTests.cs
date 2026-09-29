@@ -1921,6 +1921,8 @@ public sealed class LocalAiInstallRecoveryTests
         await File.WriteAllTextAsync(sharedCacheModel, "shared");
         await File.WriteAllTextAsync(cachedArchive, "cached");
         SetupContext context = CreateContext(temp.Path, confirmDestructive: true);
+        var messages = new List<string>();
+        context.Logger.LogEmitted += (_, entry) => messages.Add(entry.Message);
 
         PipelineResult result = await new SetupPipeline([new PersistLocalAiManifestStep()])
             .UninstallAsync(context);
@@ -1929,6 +1931,11 @@ public sealed class LocalAiInstallRecoveryTests
         Assert.False(Directory.Exists(root));
         Assert.Equal("shared", await File.ReadAllTextAsync(sharedCacheModel));
         Assert.Equal("cached", await File.ReadAllTextAsync(cachedArchive));
+        // The logger redacts 43-character identifiers as tokens, so the variable
+        // name must stay readable in the sanitized uninstall message.
+        string cacheMessage = Assert.Single(messages, message => message.StartsWith("Kept the verified", StringComparison.Ordinal));
+        Assert.Contains(LocalAiArtifactInstaller.RetainedArchiveSetsEnvironmentVariable, cacheMessage);
+        Assert.Contains("LocalAICache", cacheMessage);
     }
 
     [Fact]
