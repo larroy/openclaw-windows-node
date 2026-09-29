@@ -1742,27 +1742,79 @@ public sealed class LocalAiInstallRecoveryTests
     }
 
     [Fact]
-    public async Task RuntimeInstall_PrunesStaleCacheEntriesKeepingNewestThree()
+    public async Task RuntimeInstall_PrunesStaleCacheKeepingNewestThreeCompleteSets()
     {
         using var temp = new TempDirectory();
+        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
+        string[][] staleSets = CreateStaleArchiveSets(archivesRoot, setCount: 5);
+        string unrelated = Path.Combine(archivesRoot, "not-a-hash");
+        Directory.CreateDirectory(unrelated);
+        Directory.SetLastWriteTimeUtc(unrelated, DateTime.UtcNow.AddDays(-60));
+
+        (string binaryEntry, string dependencyEntry) = await InstallRuntimeWithCacheAsync(
+            temp.Path,
+            retainedStaleArchiveSets: LocalAiArtifactInstaller.DefaultRetainedStaleArchiveSets);
+
+        Assert.True(Directory.Exists(binaryEntry));
+        Assert.True(Directory.Exists(dependencyEntry));
+        Assert.All(staleSets[0], entry => Assert.False(Directory.Exists(entry)));
+        Assert.All(staleSets[1], entry => Assert.False(Directory.Exists(entry)));
+        Assert.All(staleSets.Skip(2).SelectMany(set => set), entry => Assert.True(Directory.Exists(entry)));
+        Assert.True(Directory.Exists(unrelated));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task RuntimeInstall_PrunesStaleCacheToConfiguredSetCount(int retainedSets)
+    {
+        using var temp = new TempDirectory();
+        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
+        string[][] staleSets = CreateStaleArchiveSets(archivesRoot, setCount: 3);
+
+        (string binaryEntry, string dependencyEntry) = await InstallRuntimeWithCacheAsync(
+            temp.Path,
+            retainedSets);
+
+        Assert.True(Directory.Exists(binaryEntry));
+        Assert.True(Directory.Exists(dependencyEntry));
+        for (int index = 0; index < staleSets.Length; index++)
+        {
+            bool kept = index >= staleSets.Length - retainedSets;
+            Assert.All(staleSets[index], entry => Assert.Equal(kept, Directory.Exists(entry)));
+        }
+    }
+
+    /// <summary>
+    /// Creates <paramref name="setCount"/> two-archive sets, oldest first. Entries in one
+    /// set share a last-write time, as a prune pass leaves them while they are current.
+    /// </summary>
+    private static string[][] CreateStaleArchiveSets(string archivesRoot, int setCount)
+    {
+        DateTime baseline = DateTime.UtcNow.AddDays(-30);
+        return Enumerable.Range(1, setCount)
+            .Select(set => new[] { "old-runtime.zip", "old-dependency.zip" }
+                .Select((fileName, archive) =>
+                {
+                    string entry = Path.Combine(
+                        archivesRoot,
+                        new string((char)('0' + set), 63) + (char)('a' + archive));
+                    Directory.CreateDirectory(entry);
+                    File.WriteAllText(Path.Combine(entry, fileName), "old");
+                    Directory.SetLastWriteTimeUtc(entry, baseline.AddDays(set));
+                    return entry;
+                })
+                .ToArray())
+            .ToArray();
+    }
+
+    private static async Task<(string BinaryEntry, string DependencyEntry)> InstallRuntimeWithCacheAsync(
+        string localDataDirectory,
+        int retainedStaleArchiveSets)
+    {
         byte[] binaryZip = CreateZip(("llama-server.exe", "server"u8.ToArray()));
         byte[] dependencyZip = CreateZip(("cudart64_13.dll", "cuda"u8.ToArray()));
         LlamaRuntimeVariant runtime = CreateRuntime(binaryZip, dependencyZip);
-        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
-        DateTime baseline = DateTime.UtcNow.AddDays(-30);
-        string[] stale = Enumerable.Range(1, 5)
-            .Select(index =>
-            {
-                string entry = Path.Combine(archivesRoot, new string((char)('0' + index), 64));
-                Directory.CreateDirectory(entry);
-                File.WriteAllText(Path.Combine(entry, "old-runtime.zip"), "old");
-                Directory.SetLastWriteTimeUtc(entry, baseline.AddDays(index));
-                return entry;
-            })
-            .ToArray();
-        string unrelated = Path.Combine(archivesRoot, "not-a-hash");
-        Directory.CreateDirectory(unrelated);
-        Directory.SetLastWriteTimeUtc(unrelated, baseline);
         using var client = new HttpClient(new DelegateHandler(request =>
         {
             byte[] bytes = request.RequestUri!.AbsolutePath.EndsWith("runtime.zip", StringComparison.Ordinal)
@@ -1771,19 +1823,17 @@ public sealed class LocalAiInstallRecoveryTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
         }));
         var installer = new LlamaRuntimeInstaller(
-            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true),
+            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true, retainedStaleArchiveSets),
             new ValidRuntimeInspector());
 
-        await installer.InstallAsync(temp.Path, runtime, progress: null, CancellationToken.None);
+        await installer.InstallAsync(localDataDirectory, runtime, progress: null, CancellationToken.None);
 
-        Assert.True(File.Exists(Path.Combine(archivesRoot, Sha256(binaryZip), "runtime.zip")));
-        Assert.True(File.Exists(Path.Combine(archivesRoot, Sha256(dependencyZip), "dependency.zip")));
-        Assert.False(Directory.Exists(stale[0]));
-        Assert.False(Directory.Exists(stale[1]));
-        Assert.True(Directory.Exists(stale[2]));
-        Assert.True(Directory.Exists(stale[3]));
-        Assert.True(Directory.Exists(stale[4]));
-        Assert.True(Directory.Exists(unrelated));
+        string archivesRoot = Path.Combine(localDataDirectory, "LocalAICache", "archives");
+        string binaryEntry = Path.Combine(archivesRoot, Sha256(binaryZip));
+        string dependencyEntry = Path.Combine(archivesRoot, Sha256(dependencyZip));
+        Assert.True(File.Exists(Path.Combine(binaryEntry, "runtime.zip")));
+        Assert.True(File.Exists(Path.Combine(dependencyEntry, "dependency.zip")));
+        return (binaryEntry, dependencyEntry);
     }
 
     [Fact]
@@ -1839,6 +1889,21 @@ public sealed class LocalAiInstallRecoveryTests
     public void ArchiveCacheDisableVariable_ParsesSetValues(string? value, bool disabled)
     {
         Assert.Equal(disabled, LocalAiArtifactInstaller.IsArchiveCacheDisabled(value));
+    }
+
+    [Theory]
+    [InlineData(null, 3)]
+    [InlineData("", 3)]
+    [InlineData(" ", 3)]
+    [InlineData("0", 0)]
+    [InlineData("1", 1)]
+    [InlineData(" 5 ", 5)]
+    [InlineData("-1", 3)]
+    [InlineData("two", 3)]
+    [InlineData("1.5", 3)]
+    public void ArchiveCacheRetainedSetsVariable_ParsesSetValues(string? value, int expected)
+    {
+        Assert.Equal(expected, LocalAiArtifactInstaller.ParseRetainedArchiveSets(value));
     }
 
     [Fact]

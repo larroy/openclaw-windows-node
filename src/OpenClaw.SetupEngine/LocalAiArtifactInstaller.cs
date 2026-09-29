@@ -20,7 +20,9 @@
 //      (survives uninstall rollback). Cached entries are re-verified with a
 //      full SHA-256 check over the same open handle that extraction reads.
 //      Stale cache entries are pruned, keeping the current pins plus the
-//      three most recently used others. Set the environment variable
+//      three most recently used older runtime sets (override the count with
+//      OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS; 0 keeps only the current
+//      pins). Set the environment variable
 //      OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE to skip all cache reads,
 //      writes, and pruning.
 //   6. Reports progress per phase (Downloading, Verifying, VerifyingCache,
@@ -61,6 +63,7 @@
 //     // result.ReusedCachedArchiveCount: archives served from the cache
 // -----------------------------------------------------------------------------
 
+using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
@@ -149,9 +152,10 @@ internal sealed class LocalAiArtifactInstallException : Exception
 /// which lives next to the Local AI tree and survives uninstall rollback. A cached
 /// archive is trusted only after a full SHA-256 check against the compiled-in pin,
 /// over the same open handle that extraction then reads. After a successful install,
-/// entries for the current pins are kept, along with the
-/// <see cref="RetainedStaleArchiveCacheEntries"/> most recently used entries for
-/// other hashes; older entries are deleted. Setting
+/// entries for the current pins are kept, along with the most recently used
+/// <see cref="DefaultRetainedStaleArchiveSets"/> older runtime sets (overridable
+/// through <see cref="RetainedArchiveSetsEnvironmentVariable"/>); older entries
+/// are deleted. Setting
 /// <see cref="DisableArchiveCacheEnvironmentVariable"/> skips all cache reads,
 /// writes, and pruning.
 /// </para>
@@ -159,7 +163,8 @@ internal sealed class LocalAiArtifactInstallException : Exception
 internal sealed class LocalAiArtifactInstaller
 {
     internal const string DisableArchiveCacheEnvironmentVariable = "OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE";
-    internal const int RetainedStaleArchiveCacheEntries = 3;
+    internal const string RetainedArchiveSetsEnvironmentVariable = "OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS";
+    internal const int DefaultRetainedStaleArchiveSets = 3;
     private const int DownloadBufferSize = 128 * 1024;
     private const int DownloadProgressIntervalBytes = 4 * 1024 * 1024;
     private const int MaximumRedirects = 5;
@@ -170,19 +175,48 @@ internal sealed class LocalAiArtifactInstaller
 
     private readonly HttpClient _httpClient;
     private readonly bool _archiveCacheEnabled;
+    private readonly int _retainedStaleArchiveSets;
 
     public LocalAiArtifactInstaller(HttpClient httpClient)
         : this(
             httpClient,
             archiveCacheEnabled: !IsArchiveCacheDisabled(
-                Environment.GetEnvironmentVariable(DisableArchiveCacheEnvironmentVariable)))
+                Environment.GetEnvironmentVariable(DisableArchiveCacheEnvironmentVariable)),
+            retainedStaleArchiveSets: ParseRetainedArchiveSets(
+                Environment.GetEnvironmentVariable(RetainedArchiveSetsEnvironmentVariable)))
     {
     }
 
-    internal LocalAiArtifactInstaller(HttpClient httpClient, bool archiveCacheEnabled)
+    internal LocalAiArtifactInstaller(
+        HttpClient httpClient,
+        bool archiveCacheEnabled,
+        int retainedStaleArchiveSets = DefaultRetainedStaleArchiveSets)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(retainedStaleArchiveSets);
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _archiveCacheEnabled = archiveCacheEnabled;
+        _retainedStaleArchiveSets = retainedStaleArchiveSets;
+    }
+
+    /// <summary>
+    /// Unset or blank means <see cref="DefaultRetainedStaleArchiveSets"/>. A non-negative
+    /// integer overrides it; <c>0</c> keeps only the current pins. Other values warn
+    /// and fall back to the default.
+    /// </summary>
+    internal static int ParseRetainedArchiveSets(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return DefaultRetainedStaleArchiveSets;
+
+        if (int.TryParse(value.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var sets))
+            return sets;
+
+        Trace.TraceWarning(
+            "Ignoring {0}='{1}': expected a non-negative integer. Keeping {2} older runtime sets.",
+            RetainedArchiveSetsEnvironmentVariable,
+            value,
+            DefaultRetainedStaleArchiveSets);
+        return DefaultRetainedStaleArchiveSets;
     }
 
     /// <summary>
@@ -346,7 +380,7 @@ internal sealed class LocalAiArtifactInstaller
             promoted = true;
 
             if (_archiveCacheEnabled)
-                PruneArchiveCache(localDataDirectory, pinnedArchives);
+                PruneArchiveCache(localDataDirectory, pinnedArchives, _retainedStaleArchiveSets);
 
             var result = new LocalAiArtifactInstallResult(
                 component,
@@ -715,15 +749,17 @@ internal sealed class LocalAiArtifactInstaller
     }
 
     /// <summary>
-    /// Keeps entries for the current pins plus the newest
-    /// <see cref="RetainedStaleArchiveCacheEntries"/> other entries, ranked by directory
-    /// last-write time. Current entries are touched so that, once a pin changes,
-    /// ranking reflects when each entry was last used. Unrecognized names and
-    /// reparse points are left alone. Failures only warn.
+    /// Keeps entries for the current pins plus the newest <paramref name="retainedStaleSets"/>
+    /// older runtime sets. Every prune touches all current entries with one shared
+    /// timestamp, so the entries of a runtime set (binary plus CUDA dependency zip) keep
+    /// an identical directory last-write time after its pins change; stale entries are
+    /// grouped by that timestamp and whole groups are retained or deleted together.
+    /// Unrecognized names and reparse points are left alone. Failures only warn.
     /// </summary>
     private static void PruneArchiveCache(
         string localDataDirectory,
-        IReadOnlyCollection<LocalAiPinnedArchive> currentArchives)
+        IReadOnlyCollection<LocalAiPinnedArchive> currentArchives,
+        int retainedStaleSets)
     {
         try
         {
@@ -759,8 +795,10 @@ internal sealed class LocalAiArtifactInstaller
             }
 
             foreach (var entry in staleEntries
-                         .OrderByDescending(entry => entry.LastWriteTimeUtc)
-                         .Skip(RetainedStaleArchiveCacheEntries))
+                         .GroupBy(entry => entry.LastWriteTimeUtc)
+                         .OrderByDescending(set => set.Key)
+                         .Skip(retainedStaleSets)
+                         .SelectMany(set => set))
             {
                 if (!LocalAiPathPolicy.TryDeleteArchiveCacheEntry(
                         localDataDirectory,

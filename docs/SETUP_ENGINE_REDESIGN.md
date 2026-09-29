@@ -390,9 +390,15 @@ uninstall-owned `LocalAI` tree, so reinstalls hash-verify and extract without
 downloading. A cached zip is used only after a full SHA-256 check against the
 compiled-in pin over the same open handle that extraction reads. After each
 successful runtime install, entries for the current pins are kept along with
-the 3 most recently used entries for other hashes; older entries are deleted.
-Uninstall keeps the cache. Set `OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE` to any
-value other than `0` or `false` to skip all cache reads, writes, and pruning.
+the 3 most recently used older runtime sets; older entries are deleted. A set is
+every archive a runtime install pinned together (the llama.cpp binary zip and
+its CUDA dependency zip), so pruning never keeps half of an older runtime. Set
+`OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAINED_SETS` to a non-negative integer to
+change the number of older sets kept (`0` keeps only the current pins); other
+values are ignored with a warning. Uninstall keeps the cache, which is bounded
+by this retention and logged with its path so users can delete it to reclaim
+space. Set `OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE` to any value other than `0`
+or `false` to skip all cache reads, writes, and pruning.
 
 Manifest schema 3 remains the compatibility format for existing app-owned
 model paths. Passive manifest loads, status refresh, recovery inspection, and
