@@ -1,3 +1,66 @@
+// -----------------------------------------------------------------------------
+// LocalAiArtifactInstaller.cs
+//
+// Secure downloader and installer for pinned Local AI native runtime archives.
+//
+// What this module does:
+//   1. Downloads one or more pinned ZIP archives over credential-free HTTPS
+//      from github.com, following at most five redirects and only to trusted
+//      GitHub release-asset hosts.
+//   2. Verifies each archive byte-for-byte against a compiled-in SHA-256 pin
+//      while streaming it to disk, rejecting size mismatches and hash
+//      failures with fixed-time comparisons.
+//   3. Safely extracts the verified archives into a per-run disposable staging
+//      directory, guarding every entry against path traversal, reparse
+//      points, symbolic links, and Windows device names.
+//   4. Atomically promotes the complete staging directory to the final
+//      install path with a single Directory.Move, and refuses to replace an
+//      existing install.
+//   5. Caches verified archives in LocalAICache next to the Local AI tree
+//      (survives uninstall rollback). Cached entries are re-verified with a
+//      full SHA-256 check over the same open handle that extraction reads.
+//      Stale cache entries are pruned, keeping the current pins plus the
+//      three most recently used others. Set the environment variable
+//      OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE to skip all cache reads,
+//      writes, and pruning.
+//   6. Reports progress per phase (Downloading, Verifying, VerifyingCache,
+//      Extracting, Promoting, Complete) through an optional IProgress and
+//      the ProgressChanged event, and cleans up partial downloads and
+//      staging directories on failure or cancellation.
+//
+// Component-specific release, executable, and version validation belong to
+// later policy layers (for example LlamaRuntimeInstaller). See the class
+// <summary> below for further invariants.
+//
+// Main usage (mirrors LlamaRuntimeInstaller.InstallAsync):
+//
+//     var installer = new LocalAiArtifactInstaller(httpClient);
+//     installer.ProgressChanged += (_, p) =>
+//         Console.WriteLine($"{p.Phase}: {p.Fraction:P0}");
+//
+//     var archives = new[]
+//     {
+//         new LocalAiPinnedArchive(
+//             FileName: "llama-b4218-bin-win-x64.zip",
+//             DownloadUri: new Uri("https://github.com/ggml-org/llama.cpp/releases/download/b4218/llama-b4218-bin-win-x64.zip"),
+//             SizeBytes: 12_345_678,
+//             Sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+//     };
+//
+//     LocalAiArtifactInstallResult result = await installer.InstallAsync(
+//         localDataDirectory: localDataDir,
+//         component: new LocalAiComponentIdentity("llama-server", "b4218", "win-x64"),
+//         archives: archives,
+//         progress: new Progress<LocalAiArtifactInstallProgress>(),
+//         cancellationToken: cancellationToken);
+//
+//     // result.InstallDirectory: promoted install path
+//     // result.ModelsDirectory: sibling models path
+//     // result.VerifiedArchives: file name, size, and hash of each archive
+//     // result.Rollback: the one directory a setup transaction owns
+//     // result.ReusedCachedArchiveCount: archives served from the cache
+// -----------------------------------------------------------------------------
+
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
