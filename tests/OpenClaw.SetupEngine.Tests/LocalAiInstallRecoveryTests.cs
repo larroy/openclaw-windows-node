@@ -1742,6 +1742,106 @@ public sealed class LocalAiInstallRecoveryTests
     }
 
     [Fact]
+    public async Task RuntimeInstall_PrunesStaleCacheEntriesKeepingNewestThree()
+    {
+        using var temp = new TempDirectory();
+        byte[] binaryZip = CreateZip(("llama-server.exe", "server"u8.ToArray()));
+        byte[] dependencyZip = CreateZip(("cudart64_13.dll", "cuda"u8.ToArray()));
+        LlamaRuntimeVariant runtime = CreateRuntime(binaryZip, dependencyZip);
+        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
+        DateTime baseline = DateTime.UtcNow.AddDays(-30);
+        string[] stale = Enumerable.Range(1, 5)
+            .Select(index =>
+            {
+                string entry = Path.Combine(archivesRoot, new string((char)('0' + index), 64));
+                Directory.CreateDirectory(entry);
+                File.WriteAllText(Path.Combine(entry, "old-runtime.zip"), "old");
+                Directory.SetLastWriteTimeUtc(entry, baseline.AddDays(index));
+                return entry;
+            })
+            .ToArray();
+        string unrelated = Path.Combine(archivesRoot, "not-a-hash");
+        Directory.CreateDirectory(unrelated);
+        Directory.SetLastWriteTimeUtc(unrelated, baseline);
+        using var client = new HttpClient(new DelegateHandler(request =>
+        {
+            byte[] bytes = request.RequestUri!.AbsolutePath.EndsWith("runtime.zip", StringComparison.Ordinal)
+                ? binaryZip
+                : dependencyZip;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+        }));
+        var installer = new LlamaRuntimeInstaller(
+            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true),
+            new ValidRuntimeInspector());
+
+        await installer.InstallAsync(temp.Path, runtime, progress: null, CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(archivesRoot, Sha256(binaryZip), "runtime.zip")));
+        Assert.True(File.Exists(Path.Combine(archivesRoot, Sha256(dependencyZip), "dependency.zip")));
+        Assert.False(Directory.Exists(stale[0]));
+        Assert.False(Directory.Exists(stale[1]));
+        Assert.True(Directory.Exists(stale[2]));
+        Assert.True(Directory.Exists(stale[3]));
+        Assert.True(Directory.Exists(stale[4]));
+        Assert.True(Directory.Exists(unrelated));
+    }
+
+    [Fact]
+    public async Task RuntimeInstall_DisabledCacheNeitherReadsWritesNorPrunes()
+    {
+        using var temp = new TempDirectory();
+        byte[] binaryZip = CreateZip(("llama-server.exe", "server"u8.ToArray()));
+        byte[] dependencyZip = CreateZip(("cudart64_13.dll", "cuda"u8.ToArray()));
+        LlamaRuntimeVariant runtime = CreateRuntime(binaryZip, dependencyZip);
+        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
+        string cachedBinary = Path.Combine(archivesRoot, Sha256(binaryZip), "runtime.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(cachedBinary)!);
+        await File.WriteAllBytesAsync(cachedBinary, binaryZip);
+        string[] stale = Enumerable.Range(1, 5)
+            .Select(index => Directory.CreateDirectory(
+                Path.Combine(archivesRoot, new string((char)('0' + index), 64))).FullName)
+            .ToArray();
+        int requests = 0;
+        using var client = new HttpClient(new DelegateHandler(request =>
+        {
+            requests++;
+            byte[] bytes = request.RequestUri!.AbsolutePath.EndsWith("runtime.zip", StringComparison.Ordinal)
+                ? binaryZip
+                : dependencyZip;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+        }));
+        var installer = new LlamaRuntimeInstaller(
+            new LocalAiArtifactInstaller(client, archiveCacheEnabled: false),
+            new ValidRuntimeInspector());
+
+        LlamaRuntimeInstallResult result = await installer.InstallAsync(
+            temp.Path,
+            runtime,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(2, requests);
+        Assert.Equal(0, result.ReusedCachedArchiveCount);
+        Assert.False(Directory.Exists(Path.Combine(archivesRoot, Sha256(dependencyZip))));
+        Assert.All(stale, entry => Assert.True(Directory.Exists(entry)));
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData(" ", false)]
+    [InlineData("0", false)]
+    [InlineData("false", false)]
+    [InlineData("FALSE", false)]
+    [InlineData("1", true)]
+    [InlineData("true", true)]
+    [InlineData("yes", true)]
+    public void ArchiveCacheDisableVariable_ParsesSetValues(string? value, bool disabled)
+    {
+        Assert.Equal(disabled, LocalAiArtifactInstaller.IsArchiveCacheDisabled(value));
+    }
+
+    [Fact]
     public async Task FreshProcessUninstall_RemovesCanonicalLocalAiRoot()
     {
         using var temp = new TempDirectory();

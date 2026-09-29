@@ -85,11 +85,18 @@ internal sealed class LocalAiArtifactInstallException : Exception
 /// Verified archives are kept in <see cref="LocalAiPathPolicy.ArchiveCacheDirectoryName"/>,
 /// which lives next to the Local AI tree and survives uninstall rollback. A cached
 /// archive is trusted only after a full SHA-256 check against the compiled-in pin,
-/// over the same open handle that extraction then reads.
+/// over the same open handle that extraction then reads. After a successful install,
+/// entries for the current pins are kept, along with the
+/// <see cref="RetainedStaleArchiveCacheEntries"/> most recently used entries for
+/// other hashes; older entries are deleted. Setting
+/// <see cref="DisableArchiveCacheEnvironmentVariable"/> skips all cache reads,
+/// writes, and pruning.
 /// </para>
 /// </summary>
 internal sealed class LocalAiArtifactInstaller
 {
+    internal const string DisableArchiveCacheEnvironmentVariable = "OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE";
+    internal const int RetainedStaleArchiveCacheEntries = 3;
     private const int DownloadBufferSize = 128 * 1024;
     private const int DownloadProgressIntervalBytes = 4 * 1024 * 1024;
     private const int MaximumRedirects = 5;
@@ -99,11 +106,29 @@ internal sealed class LocalAiArtifactInstaller
     private const int UnixSymbolicLink = 0xA000;
 
     private readonly HttpClient _httpClient;
+    private readonly bool _archiveCacheEnabled;
 
     public LocalAiArtifactInstaller(HttpClient httpClient)
+        : this(
+            httpClient,
+            archiveCacheEnabled: !IsArchiveCacheDisabled(
+                Environment.GetEnvironmentVariable(DisableArchiveCacheEnvironmentVariable)))
+    {
+    }
+
+    internal LocalAiArtifactInstaller(HttpClient httpClient, bool archiveCacheEnabled)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _archiveCacheEnabled = archiveCacheEnabled;
     }
+
+    /// <summary>
+    /// Any non-empty value other than <c>0</c> or <c>false</c> disables the archive cache.
+    /// </summary>
+    internal static bool IsArchiveCacheDisabled(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Trim() is not "0" &&
+        !value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase);
 
     public event EventHandler<LocalAiArtifactInstallProgress>? ProgressChanged;
 
@@ -129,7 +154,11 @@ internal sealed class LocalAiArtifactInstaller
             throw new LocalAiArtifactInstallException(pathError);
         }
 
-        var resolvedArchives = ResolveArchivePaths(localDataDirectory, paths, pinnedArchives);
+        var resolvedArchives = ResolveArchivePaths(
+            localDataDirectory,
+            paths,
+            pinnedArchives,
+            _archiveCacheEnabled);
         var runId = Guid.NewGuid().ToString("N");
         if (!LocalAiPathPolicy.TryGetStagingDirectory(
                 paths,
@@ -252,6 +281,9 @@ internal sealed class LocalAiArtifactInstaller
 
             Directory.Move(stagingDirectory, paths.InstallDirectory);
             promoted = true;
+
+            if (_archiveCacheEnabled)
+                PruneArchiveCache(localDataDirectory, pinnedArchives);
 
             var result = new LocalAiArtifactInstallResult(
                 component,
@@ -619,6 +651,88 @@ internal sealed class LocalAiArtifactInstaller
         }
     }
 
+    /// <summary>
+    /// Keeps entries for the current pins plus the newest
+    /// <see cref="RetainedStaleArchiveCacheEntries"/> other entries, ranked by directory
+    /// last-write time. Current entries are touched so that, once a pin changes,
+    /// ranking reflects when each entry was last used. Unrecognized names and
+    /// reparse points are left alone. Failures only warn.
+    /// </summary>
+    private static void PruneArchiveCache(
+        string localDataDirectory,
+        IReadOnlyCollection<LocalAiPinnedArchive> currentArchives)
+    {
+        try
+        {
+            if (!LocalAiPathPolicy.TryGetArchiveCacheArchivesDirectory(
+                    localDataDirectory,
+                    out var archivesDirectory,
+                    out var pathError))
+            {
+                Trace.TraceWarning("Could not prune the Local AI archive cache: {0}", pathError);
+                return;
+            }
+
+            if (!Directory.Exists(archivesDirectory))
+                return;
+
+            var currentHashes = currentArchives
+                .Select(archive => archive.Sha256)
+                .ToHashSet(StringComparer.Ordinal);
+            var now = DateTime.UtcNow;
+            var staleEntries = new List<DirectoryInfo>();
+            foreach (var entry in new DirectoryInfo(archivesDirectory).EnumerateDirectories())
+            {
+                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                    !LocalAiPathPolicy.IsArchiveCacheEntryName(entry.Name))
+                {
+                    continue;
+                }
+
+                if (currentHashes.Contains(entry.Name))
+                    TryTouchCacheEntry(entry, now);
+                else
+                    staleEntries.Add(entry);
+            }
+
+            foreach (var entry in staleEntries
+                         .OrderByDescending(entry => entry.LastWriteTimeUtc)
+                         .Skip(RetainedStaleArchiveCacheEntries))
+            {
+                if (!LocalAiPathPolicy.TryDeleteArchiveCacheEntry(
+                        localDataDirectory,
+                        entry.Name,
+                        out var deleteError))
+                {
+                    Trace.TraceWarning(
+                        "Could not prune Local AI archive cache entry '{0}': {1}",
+                        entry.FullName,
+                        deleteError);
+                }
+            }
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Trace.TraceWarning("Could not prune the Local AI archive cache: {0}", ex.Message);
+        }
+    }
+
+    private static void TryTouchCacheEntry(DirectoryInfo entry, DateTime now)
+    {
+        try
+        {
+            entry.LastWriteTimeUtc = now;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning(
+                "Could not update Local AI archive cache entry '{0}': {1}",
+                entry.FullName,
+                ex.Message);
+        }
+    }
+
     private async Task<HttpResponseMessage> SendWithValidatedRedirectsAsync(
         Uri initialUri,
         CancellationToken cancellationToken)
@@ -948,7 +1062,8 @@ internal sealed class LocalAiArtifactInstaller
     private static ResolvedArchive[] ResolveArchivePaths(
         string localDataDirectory,
         LocalAiSetupPaths paths,
-        LocalAiPinnedArchive[] archives)
+        LocalAiPinnedArchive[] archives,
+        bool archiveCacheEnabled)
     {
         var resolved = new ResolvedArchive[archives.Length];
         for (var index = 0; index < archives.Length; index++)
@@ -972,23 +1087,10 @@ internal sealed class LocalAiArtifactInstaller
                 throw new LocalAiArtifactInstallException(pathError);
             }
 
-            string? cachePath = null;
-            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
-                    localDataDirectory,
-                    archive.FileName,
-                    archive.Sha256,
-                    out var resolvedCachePath,
-                    out var cacheError))
-            {
-                Trace.TraceWarning(
-                    "Local AI archive cache is unavailable for '{0}': {1}",
-                    archive.FileName,
-                    cacheError);
-            }
-            else
-            {
-                cachePath = resolvedCachePath;
-            }
+            // A null cache path makes every cache read and write a no-op.
+            string? cachePath = archiveCacheEnabled
+                ? ResolveArchiveCachePath(localDataDirectory, archive)
+                : null;
 
             resolved[index] = new ResolvedArchive(
                 archive,
@@ -998,6 +1100,27 @@ internal sealed class LocalAiArtifactInstaller
         }
 
         return resolved;
+    }
+
+    private static string? ResolveArchiveCachePath(
+        string localDataDirectory,
+        LocalAiPinnedArchive archive)
+    {
+        if (LocalAiPathPolicy.TryGetArchiveCachePath(
+                localDataDirectory,
+                archive.FileName,
+                archive.Sha256,
+                out var cachePath,
+                out var cacheError))
+        {
+            return cachePath;
+        }
+
+        Trace.TraceWarning(
+            "Local AI archive cache is unavailable for '{0}': {1}",
+            archive.FileName,
+            cacheError);
+        return null;
     }
 
     private static void RevalidatePaths(

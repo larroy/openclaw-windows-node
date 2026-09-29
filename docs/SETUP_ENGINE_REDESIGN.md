@@ -382,6 +382,18 @@ materialization copies from that same verified open handle. A configured cache
 root equal to or below the app-owned `LocalAI` directory is rejected before
 mutation because uninstall removes that managed tree recursively.
 
+### Local AI runtime archive cache
+
+Verified llama.cpp runtime zips are kept in
+`<LocalDataDir>\LocalAICache\archives\<sha256>\<file>`, next to the
+uninstall-owned `LocalAI` tree, so reinstalls hash-verify and extract without
+downloading. A cached zip is used only after a full SHA-256 check against the
+compiled-in pin over the same open handle that extraction reads. After each
+successful runtime install, entries for the current pins are kept along with
+the 3 most recently used entries for other hashes; older entries are deleted.
+Uninstall keeps the cache. Set `OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE` to any
+value other than `0` or `false` to skip all cache reads, writes, and pruning.
+
 Manifest schema 3 remains the compatibility format for existing app-owned
 model paths. Passive manifest loads, status refresh, recovery inspection, and
 uninstall reads do not migrate it. Setup reconciliation is the explicit

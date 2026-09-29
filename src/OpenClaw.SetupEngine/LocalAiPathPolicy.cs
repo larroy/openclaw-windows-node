@@ -216,6 +216,85 @@ internal static class LocalAiPathPolicy
         return true;
     }
 
+    /// <summary>
+    /// Resolves the <c>LocalAICache\archives</c> directory whose immediate children are
+    /// content-addressed entries named by lowercase SHA-256.
+    /// </summary>
+    public static bool TryGetArchiveCacheArchivesDirectory(
+        string localDataDirectory,
+        out string archivesDirectory,
+        out string error)
+    {
+        archivesDirectory = "";
+        if (string.IsNullOrWhiteSpace(localDataDirectory))
+        {
+            error = "Local AI data directory is required.";
+            return false;
+        }
+
+        string localDataRoot;
+        string candidate;
+        try
+        {
+            localDataRoot = NormalizePath(localDataDirectory);
+            candidate = NormalizePath(Path.Combine(localDataRoot, ArchiveCacheDirectoryName, "archives"));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"Invalid Local AI archive cache path: {ex.Message}";
+            return false;
+        }
+
+        if (!PathEquals(Path.GetDirectoryName(Path.GetDirectoryName(candidate)), localDataRoot))
+        {
+            error = "Local AI archive cache path escaped the app-owned cache root.";
+            return false;
+        }
+
+        if (!TryValidateExistingPathChain(localDataRoot, candidate, out error))
+            return false;
+
+        archivesDirectory = candidate;
+        error = "";
+        return true;
+    }
+
+    public static bool IsArchiveCacheEntryName(string name) =>
+        name.Length == 64 && name.All(IsLowerHex);
+
+    /// <summary>
+    /// Deletes one content-addressed archive cache entry, refusing reparse points
+    /// anywhere in the chain or tree.
+    /// </summary>
+    public static bool TryDeleteArchiveCacheEntry(
+        string localDataDirectory,
+        string sha256,
+        out string error)
+    {
+        if (!IsArchiveCacheEntryName(sha256))
+        {
+            error = "Local AI archive cache entry name is not a lowercase SHA-256.";
+            return false;
+        }
+
+        if (!TryGetArchiveCacheArchivesDirectory(localDataDirectory, out var archivesDirectory, out error))
+            return false;
+
+        // Both paths were normalized by TryGetArchiveCacheArchivesDirectory above.
+        string localDataRoot = NormalizePath(localDataDirectory);
+        string entryPath = Path.Combine(archivesDirectory, sha256);
+        if (!IsStrictDescendant(entryPath, archivesDirectory))
+        {
+            error = "Local AI archive cache entry escaped the app-owned cache root.";
+            return false;
+        }
+
+        if (!TryValidateExistingPathChain(localDataRoot, entryPath, out error))
+            return false;
+
+        return TryDeleteValidatedTree(localDataRoot, entryPath, out error);
+    }
+
     public static bool TryGetModelPaths(
         LocalAiSetupPaths paths,
         string repositoryId,
@@ -412,6 +491,19 @@ internal static class LocalAiPathPolicy
         if (!TryValidateExistingPathChain(localDataRoot, deletePath, out error))
             return false;
 
+        return TryDeleteValidatedTree(localDataRoot, deletePath, out error);
+    }
+
+    /// <summary>
+    /// Deletes a file or tree whose containment and existing path chain the caller
+    /// has already validated. Each entry is revalidated just before deletion.
+    /// </summary>
+    private static bool TryDeleteValidatedTree(
+        string localDataRoot,
+        string deletePath,
+        out string error)
+    {
+        error = "";
         try
         {
             if (!File.Exists(deletePath) && !Directory.Exists(deletePath))
