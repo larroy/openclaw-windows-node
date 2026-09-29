@@ -30,8 +30,7 @@ public sealed partial class SetupWindow : Window
     private bool _showStartupPreferenceOnComplete = true;
     private readonly string _dataDir;
     private readonly string _localDataDir;
-    private readonly object _localAiHardwareProbeLock = new();
-    private Task<HostHardwareInfo>? _localAiHardwareProbeTask;
+    private readonly LocalAiHardwareProbeCache _localAiHardwareProbe = new(() => new CudaHostHardwareProbe().Probe());
     private readonly WslViabilityProbe _wslViabilityProbe = new(InspectWslViabilityAsync);
     private bool _startAtLocalAiRecoveryReview;
     private bool _pinLocalAiRecoveryModel;
@@ -289,21 +288,8 @@ public sealed partial class SetupWindow : Window
         _config.Settings.MergeCapabilitiesIntoSettingsFile(Path.Combine(_dataDir, "settings.json"));
     }
 
-    internal Task<HostHardwareInfo> GetLocalAiHardwareAsync(bool forceRefresh = false)
-    {
-        lock (_localAiHardwareProbeLock)
-        {
-            if (forceRefresh ||
-                _localAiHardwareProbeTask is null ||
-                _localAiHardwareProbeTask.IsFaulted ||
-                _localAiHardwareProbeTask.IsCanceled)
-            {
-                _localAiHardwareProbeTask = Task.Run(() => new CudaHostHardwareProbe().Probe());
-            }
-
-            return _localAiHardwareProbeTask;
-        }
-    }
+    internal Task<HostHardwareInfo> GetLocalAiHardwareAsync(bool forceRefresh = false) =>
+        _localAiHardwareProbe.GetAsync(forceRefresh);
 
     internal Task<WslViabilityResult> GetWslViabilityAsync(bool refresh = false) =>
         _wslViabilityProbe.GetAsync(refresh);

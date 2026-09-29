@@ -1,6 +1,8 @@
 using OpenClaw.Connection;
 using OpenClaw.TestSupport;
 using OpenClaw.Shared;
+using OpenClaw.Shared.Inference;
+using OpenClaw.Shared.Inference.Catalog;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -3207,6 +3209,113 @@ public class SetupStepsTests : IDisposable
             string.Empty));
         Assert.Equal(WslViabilityKind.Ready, (await refreshed).Kind);
         Assert.Equal(2, Volatile.Read(ref inspectionCount));
+    }
+
+    // A 48GB-SKU RTX Spark (the hardware-verified cuMemGetInfo total), which the fixed
+    // SKU table routes to a recommended model, so complete facts evaluate as eligible.
+    private static HostHardwareInfo CreateCompleteProbeHardware() => new(
+        Architecture.Arm64,
+        128L * 1024 * 1024 * 1024,
+        100L * 1024 * 1024 * 1024,
+        [
+            new GpuInfo(
+                GpuVendor.Nvidia,
+                "NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)",
+                GpuVisibleMemoryBytes: 48_585_498_624,
+                FreeGpuVisibleMemoryBytes: 48_585_498_624,
+                DriverVersion: "616.00",
+                CudaMajorVersion: 13,
+                StableId: "GPU-SPARK"),
+        ],
+        VulkanAvailable: false);
+
+    private static HostHardwareInfo CreateIncompleteProbeHardware() => new(
+        Architecture.Arm64,
+        128L * 1024 * 1024 * 1024,
+        100L * 1024 * 1024 * 1024,
+        [
+            new GpuInfo(
+                GpuVendor.Nvidia,
+                "NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)",
+                CudaMajorVersion: 13,
+                StableId: "GPU-SPARK"),
+        ],
+        VulkanAvailable: false);
+
+    [Fact]
+    public async Task LocalAiHardwareProbeCache_ReusesCompleteProbeUntilForcedRefresh()
+    {
+        var probeCount = 0;
+        var cache = new LocalAiHardwareProbeCache(() =>
+        {
+            Interlocked.Increment(ref probeCount);
+            return CreateCompleteProbeHardware();
+        });
+
+        Task<HostHardwareInfo> first = cache.GetAsync();
+        Task<HostHardwareInfo> second = cache.GetAsync();
+
+        Assert.Same(first, second);
+        HostHardwareInfo firstResult = await first;
+        Assert.Equal(1, Volatile.Read(ref probeCount));
+
+        Task<HostHardwareInfo> refreshed = cache.GetAsync(forceRefresh: true);
+
+        Assert.NotSame(first, refreshed);
+        await refreshed;
+        Assert.Equal(2, Volatile.Read(ref probeCount));
+    }
+
+    [Fact]
+    public async Task LocalAiHardwareProbeCache_ReprobesAfterIncompleteFacts()
+    {
+        var probeCount = 0;
+        var cache = new LocalAiHardwareProbeCache(() =>
+            Interlocked.Increment(ref probeCount) == 1
+                ? CreateIncompleteProbeHardware()
+                : CreateCompleteProbeHardware());
+
+        Task<HostHardwareInfo> first = cache.GetAsync();
+
+        Assert.Equal(
+            LocalInferenceEligibilityFailureCode.HardwareFactsIncomplete,
+            LocalInferenceEligibility.Evaluate(await first).FailureCode);
+
+        Task<HostHardwareInfo> second = cache.GetAsync();
+        HostHardwareInfo secondResult = await second;
+
+        Assert.Equal(
+            LocalInferenceEligibilityFailureCode.None,
+            LocalInferenceEligibility.Evaluate(secondResult).FailureCode);
+        Assert.NotSame(first, second);
+        Assert.Equal(2, Volatile.Read(ref probeCount));
+
+        Task<HostHardwareInfo> third = cache.GetAsync();
+
+        Assert.Same(second, third);
+        Assert.Equal(2, Volatile.Read(ref probeCount));
+    }
+
+    [Fact]
+    public async Task LocalAiHardwareProbeCache_ReprobesAfterFault()
+    {
+        var probeCount = 0;
+        var cache = new LocalAiHardwareProbeCache(() =>
+        {
+            if (Interlocked.Increment(ref probeCount) == 1)
+                throw new InvalidOperationException("Transient CUDA read failure.");
+            return CreateCompleteProbeHardware();
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => cache.GetAsync());
+
+        Task<HostHardwareInfo> second = cache.GetAsync();
+        HostHardwareInfo secondResult = await second;
+
+        Assert.Equal(
+            LocalInferenceEligibilityFailureCode.None,
+            LocalInferenceEligibility.Evaluate(secondResult).FailureCode);
+        Assert.Equal(2, Volatile.Read(ref probeCount));
     }
 
     [Fact]

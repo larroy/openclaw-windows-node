@@ -454,24 +454,6 @@ public sealed class LocalAiSetupUxContractTests
     }
 
     [Fact]
-    public void SetupWindow_LocalAiHardwareProbeCache_CanRefreshAfterFault()
-    {
-        string root = TestRepositoryPaths.GetRepositoryRoot();
-        string source = File.ReadAllText(Path.Combine(
-            root,
-            "src",
-            "OpenClaw.SetupEngine.UI",
-            "SetupWindow.xaml.cs"));
-        string method = ExtractMethod(source, "GetLocalAiHardwareAsync");
-
-        Assert.Contains("bool forceRefresh = false", method);
-        Assert.Contains("forceRefresh ||", method);
-        Assert.Contains("_localAiHardwareProbeTask.IsFaulted", method);
-        Assert.Contains("_localAiHardwareProbeTask.IsCanceled", method);
-        Assert.Contains("_localAiHardwareProbeTask = Task.Run", method);
-    }
-
-    [Fact]
     public void LocalAiPage_InfoBarPrecedesAndDoesNotDisableReasonAction()
     {
         string root = TestRepositoryPaths.GetRepositoryRoot();

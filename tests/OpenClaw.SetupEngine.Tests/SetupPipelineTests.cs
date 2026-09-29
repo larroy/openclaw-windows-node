@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using OpenClaw.Connection.LocalAi;
+using OpenClaw.TestSupport;
 
 namespace OpenClaw.SetupEngine.Tests;
 
@@ -7,13 +8,13 @@ public class SetupPipelineTests
 {
     private SetupLogger CreateLogger() => new(filePath: null, LogLevel.Trace);
 
-    private SetupContext CreateContext(SetupConfig? config = null, CancellationToken ct = default)
+    private SetupContext CreateContext(SetupConfig? config = null, CancellationToken ct = default, string? localDataDir = null)
     {
         var cfg = config ?? new SetupConfig();
         var logger = CreateLogger();
         var journal = new TransactionJournal(filePath: null);
         var commands = new CommandRunner(logger);
-        return new SetupContext(cfg, logger, journal, commands, ct);
+        return new SetupContext(cfg, logger, journal, commands, ct, localDataDir: localDataDir);
     }
 
     // A mock step for testing
@@ -391,7 +392,8 @@ public class SetupPipelineTests
     [Fact]
     public async Task PreserveLocalAiRecoveryGateway_PreservesReplacementReceiptWhenOriginalEndpointUnhealthy()
     {
-        var context = CreateContext(LocalAiRecoveryConfig());
+        using var temp = new TempDirectory("local-ai-recovery-rollback-");
+        var context = CreateContext(LocalAiRecoveryConfig(), localDataDir: temp.Path);
         LocalAiResolvedInstall originalInstall = CreateLocalAiResolvedInstall(context.LocalDataDir, port: 18801);
         LocalAiResolvedInstall replacementInstall = CreateLocalAiResolvedInstall(context.LocalDataDir, port: 18802);
         context.LocalAiRecoveryOriginalInstall = originalInstall;
@@ -417,7 +419,8 @@ public class SetupPipelineTests
     [Fact]
     public async Task PreserveLocalAiRecoveryGateway_RestoresReceiptWhenOriginalEndpointHealthy()
     {
-        var context = CreateContext(LocalAiRecoveryConfig());
+        using var temp = new TempDirectory("local-ai-recovery-rollback-");
+        var context = CreateContext(LocalAiRecoveryConfig(), localDataDir: temp.Path);
         LocalAiResolvedInstall originalInstall = CreateLocalAiResolvedInstall(context.LocalDataDir, port: 18801);
         context.LocalAiRecoveryOriginalInstall = originalInstall;
         context.LocalAiRecoveryReceiptRollbackAllowed = true;
