@@ -25,6 +25,7 @@ internal sealed record LocalAiSetupPaths(
 internal static class LocalAiPathPolicy
 {
     internal const string RootDirectoryName = "LocalAI";
+    internal const string ArchiveCacheDirectoryName = "LocalAICache";
     private const StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
 
     public static bool TryResolve(
@@ -154,6 +155,60 @@ internal static class LocalAiPathPolicy
         if (!TryValidateExistingPathChain(paths.RootDirectory, downloadPath, out error))
         {
             downloadPath = "";
+            return false;
+        }
+
+        error = "";
+        return true;
+    }
+
+    public static bool TryGetArchiveCachePath(
+        string localDataDirectory,
+        string archiveFileName,
+        string sha256,
+        out string cachePath,
+        out string error)
+    {
+        cachePath = "";
+
+        if (string.IsNullOrWhiteSpace(localDataDirectory))
+        {
+            error = "Local AI data directory is required.";
+            return false;
+        }
+
+        if (!IsSafeWindowsPathSegment(archiveFileName) ||
+            sha256.Length != 64 || !sha256.All(IsLowerHex))
+        {
+            error = "Local AI archive cache identity contains an invalid path segment.";
+            return false;
+        }
+
+        string localDataRoot;
+        string cacheRoot;
+        try
+        {
+            localDataRoot = NormalizePath(localDataDirectory);
+            cacheRoot = NormalizePath(Path.Combine(localDataRoot, ArchiveCacheDirectoryName));
+            cachePath = NormalizePath(Path.Combine(cacheRoot, "archives", sha256, archiveFileName));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"Invalid Local AI archive cache path: {ex.Message}";
+            return false;
+        }
+
+        if (!PathEquals(Path.GetDirectoryName(cacheRoot), localDataRoot) ||
+            !IsStrictDescendant(cachePath, cacheRoot))
+        {
+            cachePath = "";
+            error = "Local AI archive cache path escaped the app-owned cache root.";
+            return false;
+        }
+
+        if (!TryValidateExistingPathChain(localDataRoot, cachePath, out error))
+        {
+            cachePath = "";
             return false;
         }
 

@@ -17,7 +17,8 @@ internal sealed record LlamaRuntimeInstallResult(
     LlamaRuntimeInstallDisposition Disposition,
     bool CreatedThisRun,
     IReadOnlyList<LocalAiVerifiedArchive> VerifiedArchives,
-    LocalAiArtifactRollbackMetadata? Rollback);
+    LocalAiArtifactRollbackMetadata? Rollback,
+    int ReusedCachedArchiveCount = 0);
 
 internal sealed record LlamaRuntimeInspection(bool IsValid, string? VersionOutput, string? Error);
 
@@ -119,7 +120,8 @@ internal sealed class LlamaRuntimeInstaller : ILlamaRuntimeAcquirer
                 LlamaRuntimeInstallDisposition.Installed,
                 CreatedThisRun: true,
                 installed.VerifiedArchives,
-                installed.Rollback);
+                installed.Rollback,
+                installed.ReusedCachedArchiveCount);
         }
         catch
         {

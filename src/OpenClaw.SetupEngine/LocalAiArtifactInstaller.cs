@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
+using Trace = System.Diagnostics.Trace;
 
 namespace OpenClaw.SetupEngine;
 
@@ -19,6 +20,7 @@ internal enum LocalAiArtifactInstallPhase
 {
     Downloading,
     Verifying,
+    VerifyingCache,
     Extracting,
     Promoting,
     Complete,
@@ -57,7 +59,8 @@ internal sealed record LocalAiArtifactInstallResult(
     string InstallDirectory,
     string ModelsDirectory,
     IReadOnlyList<LocalAiVerifiedArchive> VerifiedArchives,
-    LocalAiArtifactRollbackMetadata Rollback);
+    LocalAiArtifactRollbackMetadata Rollback,
+    int ReusedCachedArchiveCount);
 
 internal sealed class LocalAiArtifactInstallException : Exception
 {
@@ -78,6 +81,12 @@ internal sealed class LocalAiArtifactInstallException : Exception
 /// promotes the complete directory without replacing an existing install.
 /// Component-specific release, executable, and version validation belong to
 /// later policy layers.
+/// <para>
+/// Verified archives are kept in <see cref="LocalAiPathPolicy.ArchiveCacheDirectoryName"/>,
+/// which lives next to the Local AI tree and survives uninstall rollback. A cached
+/// archive is trusted only after a full SHA-256 check against the compiled-in pin,
+/// over the same open handle that extraction then reads.
+/// </para>
 /// </summary>
 internal sealed class LocalAiArtifactInstaller
 {
@@ -120,7 +129,7 @@ internal sealed class LocalAiArtifactInstaller
             throw new LocalAiArtifactInstallException(pathError);
         }
 
-        var resolvedArchives = ResolveArchivePaths(paths, pinnedArchives);
+        var resolvedArchives = ResolveArchivePaths(localDataDirectory, paths, pinnedArchives);
         var runId = Guid.NewGuid().ToString("N");
         if (!LocalAiPathPolicy.TryGetStagingDirectory(
                 paths,
@@ -165,34 +174,62 @@ internal sealed class LocalAiArtifactInstaller
             Directory.CreateDirectory(stagingDirectory);
             stagingCreated = true;
 
+            var reusedFromCache = 0;
             for (var index = 0; index < resolvedArchives.Length; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var resolved = resolvedArchives[index];
                 var archiveNumber = index + 1;
-                var verifiedHash = await DownloadAndVerifyAsync(
-                    resolved.Archive,
-                    resolved.PartialArchivePath,
-                    archiveNumber,
-                    resolvedArchives.Length,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
+                string verifiedHash;
+                FileStream? cached = await TryOpenCachedArchiveAsync(
+                        localDataDirectory,
+                        resolved,
+                        archiveNumber,
+                        resolvedArchives.Length,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+                if (cached is not null)
+                {
+                    reusedFromCache++;
+                    await using (cached)
+                        await ExtractArchiveAsync(
+                            resolved.Archive,
+                            cached,
+                            stagingDirectory,
+                            archiveNumber,
+                            resolvedArchives.Length,
+                            progress,
+                            cancellationToken).ConfigureAwait(false);
+                    verifiedHash = resolved.Archive.Sha256;
+                }
+                else
+                {
+                    verifiedHash = await DownloadAndVerifyAsync(
+                        resolved.Archive,
+                        resolved.PartialArchivePath,
+                        archiveNumber,
+                        resolvedArchives.Length,
+                        progress,
+                        cancellationToken).ConfigureAwait(false);
+
+                    await using (var partial = OpenArchiveRead(resolved.PartialArchivePath))
+                        await ExtractArchiveAsync(
+                            resolved.Archive,
+                            partial,
+                            stagingDirectory,
+                            archiveNumber,
+                            resolvedArchives.Length,
+                            progress,
+                            cancellationToken).ConfigureAwait(false);
+
+                    TryStoreInCache(localDataDirectory, resolved);
+                    TryDeleteManagedFile(localDataDirectory, resolved.PartialArchivePath);
+                }
 
                 verifiedArchives.Add(new LocalAiVerifiedArchive(
                     resolved.Archive.FileName,
                     resolved.Archive.SizeBytes,
                     verifiedHash));
-
-                await ExtractArchiveAsync(
-                    resolved.Archive,
-                    resolved.PartialArchivePath,
-                    stagingDirectory,
-                    archiveNumber,
-                    resolvedArchives.Length,
-                    progress,
-                    cancellationToken).ConfigureAwait(false);
-
-                TryDeleteManagedFile(localDataDirectory, resolved.PartialArchivePath);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -221,7 +258,8 @@ internal sealed class LocalAiArtifactInstaller
                 paths.InstallDirectory,
                 paths.ModelsDirectory,
                 verifiedArchives.AsReadOnly(),
-                new LocalAiArtifactRollbackMetadata(paths.InstallDirectory));
+                new LocalAiArtifactRollbackMetadata(paths.InstallDirectory),
+                reusedFromCache);
 
             Report(progress, new(
                 LocalAiArtifactInstallPhase.Complete,
@@ -358,6 +396,229 @@ internal sealed class LocalAiArtifactInstaller
         return Convert.ToHexStringLower(actualHashBytes);
     }
 
+    private static FileStream OpenArchiveRead(string path) => new(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read,
+        DownloadBufferSize,
+        FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private async Task<FileStream?> TryOpenCachedArchiveAsync(
+        string localDataDirectory,
+        ResolvedArchive resolved,
+        int archiveNumber,
+        int archiveCount,
+        IProgress<LocalAiArtifactInstallProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (resolved.CachePath is not { } cachePath)
+            return null;
+
+        try
+        {
+            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
+                    localDataDirectory,
+                    resolved.Archive.FileName,
+                    resolved.Archive.Sha256,
+                    out var currentPath,
+                    out var pathError) ||
+                !string.Equals(currentPath, resolved.CachePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Trace.TraceWarning(
+                    "Local AI archive cache is unavailable for '{0}': {1}",
+                    resolved.Archive.FileName,
+                    pathError.Length == 0 ? "the cache path changed during installation." : pathError);
+                return null;
+            }
+
+            if (!File.Exists(cachePath))
+                return null;
+
+            var attributes = File.GetAttributes(cachePath);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                Trace.TraceWarning(
+                    "Ignoring Local AI archive cache entry '{0}' because it is a reparse point.",
+                    cachePath);
+                return null;
+            }
+
+            FileStream stream = OpenArchiveRead(cachePath);
+            try
+            {
+                if (stream.Length != resolved.Archive.SizeBytes)
+                    throw new IOException("The cached archive size does not match its pinned size.");
+
+                ReportCacheVerification(resolved.Archive, archiveNumber, archiveCount, progress, 0);
+
+                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[DownloadBufferSize];
+                long verified = 0;
+                long lastReported = 0;
+                while (true)
+                {
+                    var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                        break;
+
+                    hasher.AppendData(buffer, 0, read);
+                    verified += read;
+                    if (verified == resolved.Archive.SizeBytes ||
+                        verified - lastReported >= DownloadProgressIntervalBytes)
+                    {
+                        ReportCacheVerification(
+                            resolved.Archive,
+                            archiveNumber,
+                            archiveCount,
+                            progress,
+                            verified);
+                        lastReported = verified;
+                    }
+                }
+
+                if (verified != resolved.Archive.SizeBytes)
+                    throw new IOException("The cached archive is shorter than its pinned size.");
+
+                var actualHash = hasher.GetHashAndReset();
+                var expectedHash = Convert.FromHexString(resolved.Archive.Sha256);
+                if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
+                    throw new IOException("The cached archive failed SHA-256 verification.");
+
+                stream.Position = 0;
+                return stream;
+            }
+            catch
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning(
+                "Could not reuse the cached Local AI archive '{0}': {1}",
+                resolved.Archive.FileName,
+                ex.Message);
+            DeleteCorruptCacheEntry(
+                localDataDirectory,
+                resolved.Archive.FileName,
+                resolved.Archive.Sha256,
+                resolved.CachePath);
+            return null;
+        }
+    }
+
+    private void ReportCacheVerification(
+        LocalAiPinnedArchive archive,
+        int archiveNumber,
+        int archiveCount,
+        IProgress<LocalAiArtifactInstallProgress>? progress,
+        long verified)
+    {
+        Report(progress, new(
+            LocalAiArtifactInstallPhase.VerifyingCache,
+            archive.FileName,
+            archiveNumber,
+            archiveCount,
+            verified,
+            archive.SizeBytes,
+            LocalAiArtifactProgressUnit.Bytes));
+    }
+
+    private static void DeleteCorruptCacheEntry(
+        string localDataDirectory,
+        string archiveFileName,
+        string sha256,
+        string cachePath)
+    {
+        try
+        {
+            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
+                    localDataDirectory,
+                    archiveFileName,
+                    sha256,
+                    out var deletePath,
+                    out _) ||
+                !string.Equals(deletePath, cachePath, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(deletePath))
+            {
+                return;
+            }
+
+            File.Delete(deletePath);
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Trace.TraceWarning(
+                "Could not delete a corrupt Local AI archive cache entry '{0}': {1}",
+                cachePath,
+                ex.Message);
+        }
+    }
+
+    private static void TryStoreInCache(string localDataDirectory, ResolvedArchive resolved)
+    {
+        if (resolved.CachePath is not { } cachePath)
+            return;
+
+        try
+        {
+            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
+                    localDataDirectory,
+                    resolved.Archive.FileName,
+                    resolved.Archive.Sha256,
+                    out var currentPath,
+                    out var pathError) ||
+                !string.Equals(currentPath, resolved.CachePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Trace.TraceWarning(
+                    "Could not cache Local AI archive '{0}': {1}",
+                    resolved.Archive.FileName,
+                    pathError.Length == 0 ? "the cache path changed during installation." : pathError);
+                return;
+            }
+
+            string? cacheDirectory = Path.GetDirectoryName(cachePath);
+            if (cacheDirectory is null)
+                return;
+            Directory.CreateDirectory(cacheDirectory);
+
+            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
+                    localDataDirectory,
+                    resolved.Archive.FileName,
+                    resolved.Archive.Sha256,
+                    out var revalidatedPath,
+                    out pathError) ||
+                !string.Equals(revalidatedPath, resolved.CachePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Trace.TraceWarning(
+                    "Could not cache Local AI archive '{0}': {1}",
+                    resolved.Archive.FileName,
+                    pathError.Length == 0 ? "the cache path changed during directory creation." : pathError);
+                return;
+            }
+
+            if (File.Exists(cachePath) || Directory.Exists(cachePath))
+                return;
+
+            File.Move(resolved.PartialArchivePath, cachePath, overwrite: false);
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            Trace.TraceWarning(
+                "Could not cache Local AI archive '{0}': {1}",
+                resolved.Archive.FileName,
+                ex.Message);
+        }
+    }
+
     private async Task<HttpResponseMessage> SendWithValidatedRedirectsAsync(
         Uri initialUri,
         CancellationToken cancellationToken)
@@ -436,7 +697,7 @@ internal sealed class LocalAiArtifactInstaller
 
     private async Task ExtractArchiveAsync(
         LocalAiPinnedArchive pinnedArchive,
-        string archivePath,
+        Stream archiveStream,
         string stagingDirectory,
         int archiveNumber,
         int archiveCount,
@@ -445,14 +706,7 @@ internal sealed class LocalAiArtifactInstaller
     {
         try
         {
-            await using var archiveStream = new FileStream(
-                archivePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                DownloadBufferSize,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: false);
+            using var archive = new ZipArchive(archiveStream, ZipArchiveMode.Read, leaveOpen: true);
             var totalEntries = archive.Entries.Count;
             long completedEntries = 0;
 
@@ -692,6 +946,7 @@ internal sealed class LocalAiArtifactInstaller
     }
 
     private static ResolvedArchive[] ResolveArchivePaths(
+        string localDataDirectory,
         LocalAiSetupPaths paths,
         LocalAiPinnedArchive[] archives)
     {
@@ -717,7 +972,29 @@ internal sealed class LocalAiArtifactInstaller
                 throw new LocalAiArtifactInstallException(pathError);
             }
 
-            resolved[index] = new ResolvedArchive(archive, archivePath, partialArchivePath);
+            string? cachePath = null;
+            if (!LocalAiPathPolicy.TryGetArchiveCachePath(
+                    localDataDirectory,
+                    archive.FileName,
+                    archive.Sha256,
+                    out var resolvedCachePath,
+                    out var cacheError))
+            {
+                Trace.TraceWarning(
+                    "Local AI archive cache is unavailable for '{0}': {1}",
+                    archive.FileName,
+                    cacheError);
+            }
+            else
+            {
+                cachePath = resolvedCachePath;
+            }
+
+            resolved[index] = new ResolvedArchive(
+                archive,
+                archivePath,
+                partialArchivePath,
+                cachePath);
         }
 
         return resolved;
@@ -914,5 +1191,6 @@ internal sealed class LocalAiArtifactInstaller
     private sealed record ResolvedArchive(
         LocalAiPinnedArchive Archive,
         string ArchivePath,
-        string PartialArchivePath);
+        string PartialArchivePath,
+        string? CachePath);
 }
