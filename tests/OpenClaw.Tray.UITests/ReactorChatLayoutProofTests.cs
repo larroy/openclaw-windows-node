@@ -1554,7 +1554,7 @@ public sealed class ReactorChatLayoutProofTests(UIThreadFixture ui)
         var controls = FindDescendants<Button>(surface)
             .Where(button => AutomationProperties.GetAutomationId(button).StartsWith("ChatComposer", StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(6, controls.Length);
+        Assert.Equal(7, controls.Length);
         Assert.DoesNotContain(controls, button => AutomationProperties.GetAutomationId(button) == "ChatComposerMore");
         foreach (var control in controls)
         {

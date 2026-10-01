@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace OpenClawTray.Chat;
 
 /// <summary>
-/// Focused workflow orchestrator for the composer. It owns send/lifecycle/stop/reset
+/// Focused workflow orchestrator for the composer. It owns send/new-session/lifecycle/stop/reset
 /// confirmation/queue cancel/model set-clear/thinking/catalog/attachment ingress-
 /// remove/paste-image/voice operation cancellation and IDs, executed over the narrow
 /// <see cref="IChatComposerRuntimePort"/> and <see cref="ChatComposerHostActions"/>
@@ -210,6 +210,51 @@ internal sealed partial class ChatComposerController : IDisposable
             // — so a controller that is still alive (or whose send merely got
             // fenced by the disposed/generation check above) can always accept
             // its next send once this one has fully unwound.
+            Interlocked.Exchange(ref _sendGate, 0);
+        }
+    }
+
+    /// <summary>Toolbar "New session" action. Runs the same lifecycle path as typing
+    /// <c>/new</c> (via <see cref="SendCoreAsync"/>) without reading or clearing the
+    /// draft or pending attachments. Shares the send single-flight gate so repeated
+    /// clicks or a concurrent send cannot create two sessions. Returns false without
+    /// calling the port when disposed, inputs are missing, or not connected.</summary>
+    public async Task<bool> StartNewSessionAsync()
+    {
+        if (_disposed)
+            return false;
+        if (_vm.Inputs is not { } inputs || inputs.ConnectionState != "connected")
+            return false;
+        if (Interlocked.CompareExchange(ref _sendGate, 1, 0) != 0)
+            return false;
+
+        try
+        {
+            var generationAtStart = _generation;
+            var sendOperation = ++_sendOperation;
+            _vm.SetSending(true);
+            try
+            {
+                var thread = inputs.CurrentThread;
+                return await SendCoreAsync(thread.Id, thread.Title, "/new", Array.Empty<ChatAttachment>()).ConfigureAwait(true);
+            }
+            finally
+            {
+                if (!_disposed && generationAtStart == _generation && sendOperation == _sendOperation)
+                    _vm.SetSending(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[chat] composer new session failed: {ex}");
+            return false;
+        }
+        finally
+        {
             Interlocked.Exchange(ref _sendGate, 0);
         }
     }

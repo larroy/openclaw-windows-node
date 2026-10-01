@@ -3034,6 +3034,9 @@ Use uma destas opções:
   <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
     <value>Anexar</value>
   </data>
+  <data name="Chat_Composer_Tooltip_NewSession" xml:space="preserve">
+    <value>Nova sessão</value>
+  </data>
   <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
     <value>Voz</value>
   </data>

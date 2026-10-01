@@ -91,6 +91,7 @@ public sealed class AccessibilityScanTests
             "ChatComposerInput",
             "ChatComposerAttach",
             "ChatComposerSessionPicker",
+            "ChatComposerNewSession",
             "ChatComposerModelPicker",
             "ChatComposerReasoningPicker",
             "ChatComposerVoice",

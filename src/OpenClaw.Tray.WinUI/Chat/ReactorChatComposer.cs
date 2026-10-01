@@ -664,6 +664,12 @@ internal sealed class ReactorChatComposer : Component<ReactorChatComposerViewPro
             () => props.Session.HostActions.AttachmentPickerRequest?.Invoke(),
             props.Session.HostActions.AttachmentPickerRequest is not null,
             "ChatComposerAttach");
+        var newSessionButton = IconButton(
+            FluentIconCatalog.ChatNewSession,
+            Localized("Chat_Composer_Tooltip_NewSession", "New session"),
+            () => _ = controller.StartNewSessionAsync(),
+            inputs.ConnectionState == "connected" && !isSending,
+            "ChatComposerNewSession");
         var voiceButton = IconButton(
             isRecording
                 ? FluentIconCatalog.Stop
@@ -710,11 +716,12 @@ internal sealed class ReactorChatComposer : Component<ReactorChatComposerViewPro
                     (FrameworkElement)control));
 
         var leading = Grid(
-            [GridSize.Auto, GridSize.Star()],
+            [GridSize.Auto, GridSize.Star(), GridSize.Auto],
             [GridSize.Auto],
             attachButton.Grid(column: 0),
-            sessionPicker.Margin(compactSession ? 0 : 4, 0, 0, 0).Grid(column: 1))
-            .MaxWidth(compactSession ? 64 : 184)
+            sessionPicker.Margin(compactSession ? 0 : 4, 0, 0, 0).Grid(column: 1),
+            newSessionButton.Grid(column: 2))
+            .MaxWidth(compactSession ? 96 : 216)
             .HAlign(HorizontalAlignment.Left).VAlign(VerticalAlignment.Center);
         var pickers = Grid(
             [GridSize.Star(), GridSize.Auto],

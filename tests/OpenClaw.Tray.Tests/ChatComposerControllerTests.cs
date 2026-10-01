@@ -273,6 +273,100 @@ public sealed class ChatComposerControllerTests
     }
 
     [Fact]
+    public async Task StartNewSessionAsync_ExecutesNewLifecycleAndPreservesDraft()
+    {
+        var (vm, controller, port, _) = MakeController();
+        vm.SetDraft("keep me");
+        var attachment = new ChatAttachment { FileName = "keep.png" };
+        vm.AddAttachments(new[] { attachment });
+        port.ExecuteLifecycleGate = new TaskCompletionSource<ChatLifecycleCommandResult>();
+        port.ExecuteLifecycleGate.SetResult(new ChatLifecycleCommandResult(
+            ChatLifecycleCommandKind.New,
+            Succeeded: true,
+            NewSessionKey: "new-session-key"));
+        string? handedOff = null;
+        controller.BindSelectionHandoff(key => handedOff = key);
+
+        var accepted = await controller.StartNewSessionAsync();
+
+        Assert.True(accepted);
+        Assert.Equal(1, port.ExecuteLifecycleCallCount);
+        Assert.Equal(ChatLifecycleCommandKind.New, port.LastLifecycleCall!.Value.Command);
+        Assert.Equal("new-session-key", handedOff);
+        Assert.Equal(0, port.SendMessageCallCount);
+        Assert.Equal("keep me", vm.Draft);
+        Assert.Single(vm.PendingAttachments);
+        Assert.False(vm.IsSending);
+    }
+
+    [Fact]
+    public async Task StartNewSessionAsync_IsSingleFlight()
+    {
+        var (vm, controller, port, _) = MakeController();
+        port.ExecuteLifecycleGate = new TaskCompletionSource<ChatLifecycleCommandResult>();
+
+        var first = controller.StartNewSessionAsync();
+        var secondAccepted = await controller.StartNewSessionAsync();
+        vm.SetDraft("hi");
+        var sendAccepted = await controller.SendAsync();
+
+        Assert.False(secondAccepted);
+        Assert.False(sendAccepted);
+        Assert.Equal(1, port.ExecuteLifecycleCallCount);
+        Assert.Equal(0, port.SendMessageCallCount);
+
+        port.ExecuteLifecycleGate.SetResult(new ChatLifecycleCommandResult(
+            ChatLifecycleCommandKind.New,
+            Succeeded: true,
+            NewSessionKey: "new-session-key"));
+        var firstAccepted = await first;
+
+        Assert.True(firstAccepted);
+        Assert.Equal(1, port.ExecuteLifecycleCallCount);
+        Assert.Equal(0, port.SendMessageCallCount);
+    }
+
+    [Fact]
+    public async Task StartNewSessionAsync_DisconnectedDoesNotCallPort()
+    {
+        var (vm, controller, port, _) = MakeController();
+        vm.ApplyInputs(MakeInputs(revision: 2, connectionState: "disconnected"));
+
+        var accepted = await controller.StartNewSessionAsync();
+
+        Assert.False(accepted);
+        Assert.Equal(0, port.ExecuteLifecycleCallCount);
+        Assert.Equal(0, port.SendMessageCallCount);
+    }
+
+    [Fact]
+    public async Task StartNewSessionAsync_LifecycleFailureReleasesGate()
+    {
+        var (vm, controller, port, _) = MakeController();
+        port.ExecuteLifecycleGate = new TaskCompletionSource<ChatLifecycleCommandResult>();
+
+        var first = controller.StartNewSessionAsync();
+        port.ExecuteLifecycleGate.SetException(new InvalidOperationException("lifecycle failed"));
+        var firstAccepted = await first;
+
+        Assert.False(firstAccepted);
+        Assert.False(vm.IsSending);
+
+        // A failed lifecycle execute must release the send gate so the next
+        // click can start a session.
+        port.ExecuteLifecycleGate = new TaskCompletionSource<ChatLifecycleCommandResult>();
+        port.ExecuteLifecycleGate.SetResult(new ChatLifecycleCommandResult(
+            ChatLifecycleCommandKind.New,
+            Succeeded: true,
+            NewSessionKey: "new-session-key"));
+
+        var secondAccepted = await controller.StartNewSessionAsync();
+
+        Assert.True(secondAccepted);
+        Assert.Equal(2, port.ExecuteLifecycleCallCount);
+    }
+
+    [Fact]
     public async Task SendAsync_Compact_UsesQueuePathNotLifecycleExecute()
     {
         var (vm, controller, port, _) = MakeController();

@@ -3015,6 +3015,9 @@ Utilisez l'une de ces options :
   <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
     <value>Joindre</value>
   </data>
+  <data name="Chat_Composer_Tooltip_NewSession" xml:space="preserve">
+    <value>Nouvelle session</value>
+  </data>
   <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
     <value>Voix</value>
   </data>
