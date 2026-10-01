@@ -19,10 +19,11 @@
 //   5. Caches verified archives in LocalAICache next to the Local AI tree
 //      (survives uninstall rollback). Cached entries are re-verified with a
 //      full SHA-256 check over the same open handle that extraction reads.
-//      Stale cache entries are pruned, keeping the current pins plus the
-//      three most recently used older runtime sets (override the count with
-//      OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS; 0 keeps only the current
-//      pins). Set the environment variable
+//      After the caller accepts the installed runtime, CommitArchiveCacheSet
+//      records the pins as a completed set and prunes, keeping the current
+//      pins plus the three most recently used older complete sets (override
+//      the count with OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS; 0 keeps only
+//      the current pins). Set the environment variable
 //      OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE to skip all cache reads,
 //      writes, and pruning.
 //   6. Reports progress per phase (Downloading, Verifying, VerifyingCache,
@@ -151,11 +152,13 @@ internal sealed class LocalAiArtifactInstallException : Exception
 /// Verified archives are kept in <see cref="LocalAiPathPolicy.ArchiveCacheDirectoryName"/>,
 /// which lives next to the Local AI tree and survives uninstall rollback. A cached
 /// archive is trusted only after a full SHA-256 check against the compiled-in pin,
-/// over the same open handle that extraction then reads. After a successful install,
-/// entries for the current pins are kept, along with the most recently used
-/// <see cref="DefaultRetainedStaleArchiveSets"/> older runtime sets (overridable
-/// through <see cref="RetainedArchiveSetsEnvironmentVariable"/>); older entries
-/// are deleted. Setting
+/// over the same open handle that extraction then reads. <see cref="InstallAsync"/>
+/// only reads and fills the cache; the caller runs <see cref="CommitArchiveCacheSet"/>
+/// once the installed runtime is accepted. That records the pins as a completed set
+/// and keeps the most recently used <see cref="DefaultRetainedStaleArchiveSets"/>
+/// older complete sets (overridable through
+/// <see cref="RetainedArchiveSetsEnvironmentVariable"/>); see
+/// <see cref="LocalAiArchiveCacheRetention"/>. Setting
 /// <see cref="DisableArchiveCacheEnvironmentVariable"/> skips all cache reads,
 /// writes, and pruning.
 /// </para>
@@ -378,9 +381,6 @@ internal sealed class LocalAiArtifactInstaller
 
             Directory.Move(stagingDirectory, paths.InstallDirectory);
             promoted = true;
-
-            if (_archiveCacheEnabled)
-                PruneArchiveCache(localDataDirectory, pinnedArchives, _retainedStaleArchiveSets);
 
             var result = new LocalAiArtifactInstallResult(
                 component,
@@ -749,88 +749,22 @@ internal sealed class LocalAiArtifactInstaller
     }
 
     /// <summary>
-    /// Keeps entries for the current pins plus the newest <paramref name="retainedStaleSets"/>
-    /// older runtime sets. Every prune touches all current entries with one shared
-    /// timestamp, so the entries of a runtime set (binary plus CUDA dependency zip) keep
-    /// an identical directory last-write time after its pins change; stale entries are
-    /// grouped by that timestamp and whole groups are retained or deleted together.
-    /// Unrecognized names and reparse points are left alone. Failures only warn.
+    /// Records <paramref name="archives"/> as a completed runtime set and prunes older
+    /// cache entries. Call only after the runtime installed from these archives was
+    /// accepted, so a rejected or cancelled install never evicts the previous baseline.
+    /// Does nothing when the cache is disabled; failures only warn.
     /// </summary>
-    private static void PruneArchiveCache(
+    internal void CommitArchiveCacheSet(
         string localDataDirectory,
-        IReadOnlyCollection<LocalAiPinnedArchive> currentArchives,
-        int retainedStaleSets)
+        IReadOnlyCollection<LocalAiPinnedArchive> archives)
     {
-        try
+        if (_archiveCacheEnabled)
         {
-            if (!LocalAiPathPolicy.TryGetArchiveCacheArchivesDirectory(
-                    localDataDirectory,
-                    out var archivesDirectory,
-                    out var pathError))
-            {
-                Trace.TraceWarning("Could not prune the Local AI archive cache: {0}", pathError);
-                return;
-            }
-
-            if (!Directory.Exists(archivesDirectory))
-                return;
-
-            var currentHashes = currentArchives
-                .Select(archive => archive.Sha256)
-                .ToHashSet(StringComparer.Ordinal);
-            var now = DateTime.UtcNow;
-            var staleEntries = new List<DirectoryInfo>();
-            foreach (var entry in new DirectoryInfo(archivesDirectory).EnumerateDirectories())
-            {
-                if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
-                    !LocalAiPathPolicy.IsArchiveCacheEntryName(entry.Name))
-                {
-                    continue;
-                }
-
-                if (currentHashes.Contains(entry.Name))
-                    TryTouchCacheEntry(entry, now);
-                else
-                    staleEntries.Add(entry);
-            }
-
-            foreach (var entry in staleEntries
-                         .GroupBy(entry => entry.LastWriteTimeUtc)
-                         .OrderByDescending(set => set.Key)
-                         .Skip(retainedStaleSets)
-                         .SelectMany(set => set))
-            {
-                if (!LocalAiPathPolicy.TryDeleteArchiveCacheEntry(
-                        localDataDirectory,
-                        entry.Name,
-                        out var deleteError))
-                {
-                    Trace.TraceWarning(
-                        "Could not prune Local AI archive cache entry '{0}': {1}",
-                        entry.FullName,
-                        deleteError);
-                }
-            }
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            Trace.TraceWarning("Could not prune the Local AI archive cache: {0}", ex.Message);
-        }
-    }
-
-    private static void TryTouchCacheEntry(DirectoryInfo entry, DateTime now)
-    {
-        try
-        {
-            entry.LastWriteTimeUtc = now;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Trace.TraceWarning(
-                "Could not update Local AI archive cache entry '{0}': {1}",
-                entry.FullName,
-                ex.Message);
+            LocalAiArchiveCacheRetention.Commit(
+                localDataDirectory,
+                archives,
+                _retainedStaleArchiveSets,
+                DateTimeOffset.UtcNow);
         }
     }
 

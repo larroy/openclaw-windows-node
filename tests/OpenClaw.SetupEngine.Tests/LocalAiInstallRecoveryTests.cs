@@ -1619,7 +1619,7 @@ public sealed class LocalAiInstallRecoveryTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
         }));
         var firstInstaller = new LlamaRuntimeInstaller(
-            new LocalAiArtifactInstaller(firstClient),
+            new LocalAiArtifactInstaller(firstClient, archiveCacheEnabled: true),
             new ValidRuntimeInspector());
 
         LlamaRuntimeInstallResult first = await firstInstaller.InstallAsync(
@@ -1646,7 +1646,7 @@ public sealed class LocalAiInstallRecoveryTests
         using var secondClient = new HttpClient(new DelegateHandler(_ =>
             throw new InvalidOperationException("HTTP must not run for cached runtime archives.")));
         var secondInstaller = new LlamaRuntimeInstaller(
-            new LocalAiArtifactInstaller(secondClient),
+            new LocalAiArtifactInstaller(secondClient, archiveCacheEnabled: true),
             new ValidRuntimeInspector());
 
         LlamaRuntimeInstallResult second = await secondInstaller.InstallAsync(
@@ -1684,7 +1684,7 @@ public sealed class LocalAiInstallRecoveryTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
         }));
         var installer = new LlamaRuntimeInstaller(
-            new LocalAiArtifactInstaller(client),
+            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true),
             new ValidRuntimeInspector());
 
         LlamaRuntimeInstallResult result = await installer.InstallAsync(
@@ -1720,7 +1720,7 @@ public sealed class LocalAiInstallRecoveryTests
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
             }));
             var installer = new LlamaRuntimeInstaller(
-                new LocalAiArtifactInstaller(client),
+                new LocalAiArtifactInstaller(client, archiveCacheEnabled: true),
                 new ValidRuntimeInspector());
 
             LlamaRuntimeInstallResult result = await installer.InstallAsync(
@@ -1741,100 +1741,183 @@ public sealed class LocalAiInstallRecoveryTests
         }
     }
 
-    [Fact]
-    public async Task RuntimeInstall_PrunesStaleCacheKeepingNewestThreeCompleteSets()
-    {
-        using var temp = new TempDirectory();
-        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
-        string[][] staleSets = CreateStaleArchiveSets(archivesRoot, setCount: 5);
-        string unrelated = Path.Combine(archivesRoot, "not-a-hash");
-        Directory.CreateDirectory(unrelated);
-        Directory.SetLastWriteTimeUtc(unrelated, DateTime.UtcNow.AddDays(-60));
-
-        (string binaryEntry, string dependencyEntry) = await InstallRuntimeWithCacheAsync(
-            temp.Path,
-            retainedStaleArchiveSets: LocalAiArtifactInstaller.DefaultRetainedStaleArchiveSets);
-
-        Assert.True(Directory.Exists(binaryEntry));
-        Assert.True(Directory.Exists(dependencyEntry));
-        Assert.All(staleSets[0], entry => Assert.False(Directory.Exists(entry)));
-        Assert.All(staleSets[1], entry => Assert.False(Directory.Exists(entry)));
-        Assert.All(staleSets.Skip(2).SelectMany(set => set), entry => Assert.True(Directory.Exists(entry)));
-        Assert.True(Directory.Exists(unrelated));
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
-    public async Task RuntimeInstall_PrunesStaleCacheToConfiguredSetCount(int retainedSets)
+    [InlineData(LocalAiArtifactInstaller.DefaultRetainedStaleArchiveSets)]
+    public async Task RuntimeInstall_PrunesCacheToNewestCompleteSets(int retainedSets)
     {
         using var temp = new TempDirectory();
-        string archivesRoot = Path.Combine(temp.Path, "LocalAICache", "archives");
-        string[][] staleSets = CreateStaleArchiveSets(archivesRoot, setCount: 3);
+        string unrelated = Directory.CreateDirectory(Path.Combine(ArchivesRoot(temp.Path), "not-a-hash")).FullName;
+        CacheTestSet[] history = Enumerable.Range(1, 5).Select(index => CreateCacheTestSet($"old-{index}")).ToArray();
+        CacheTestSet current = CreateCacheTestSet("current");
 
-        (string binaryEntry, string dependencyEntry) = await InstallRuntimeWithCacheAsync(
-            temp.Path,
-            retainedSets);
+        foreach (CacheTestSet set in history.Append(current))
+            await InstallCacheTestSetAsync(temp.Path, set, retainedSets);
 
-        Assert.True(Directory.Exists(binaryEntry));
-        Assert.True(Directory.Exists(dependencyEntry));
-        for (int index = 0; index < staleSets.Length; index++)
+        Assert.True(IsWhollyCached(temp.Path, current));
+        for (int index = 0; index < history.Length; index++)
         {
-            bool kept = index >= staleSets.Length - retainedSets;
-            Assert.All(staleSets[index], entry => Assert.Equal(kept, Directory.Exists(entry)));
+            bool kept = index >= history.Length - retainedSets;
+            Assert.Equal(kept, IsWhollyCached(temp.Path, history[index]));
+            Assert.Equal(kept, IsPartlyCached(temp.Path, history[index]));
         }
+        Assert.True(Directory.Exists(unrelated));
     }
 
-    /// <summary>
-    /// Creates <paramref name="setCount"/> two-archive sets, oldest first. Entries in one
-    /// set share a last-write time, as a prune pass leaves them while they are current.
-    /// </summary>
-    private static string[][] CreateStaleArchiveSets(string archivesRoot, int setCount)
+    [Fact]
+    public async Task RuntimeInstall_FailedAcquisitionDoesNotDisplaceCompleteSet()
     {
-        DateTime baseline = DateTime.UtcNow.AddDays(-30);
-        return Enumerable.Range(1, setCount)
-            .Select(set => new[] { "old-runtime.zip", "old-dependency.zip" }
-                .Select((fileName, archive) =>
-                {
-                    string entry = Path.Combine(
-                        archivesRoot,
-                        new string((char)('0' + set), 63) + (char)('a' + archive));
-                    Directory.CreateDirectory(entry);
-                    File.WriteAllText(Path.Combine(entry, fileName), "old");
-                    Directory.SetLastWriteTimeUtc(entry, baseline.AddDays(set));
-                    return entry;
-                })
-                .ToArray())
-            .ToArray();
+        using var temp = new TempDirectory();
+        CacheTestSet complete = CreateCacheTestSet("complete");
+        CacheTestSet failed = CreateCacheTestSet("failed");
+        CacheTestSet next = CreateCacheTestSet("next");
+        await InstallCacheTestSetAsync(temp.Path, complete, retainedSets: 1);
+
+        await Assert.ThrowsAsync<LocalAiArtifactInstallException>(() => InstallCacheTestSetAsync(
+            temp.Path,
+            failed,
+            retainedSets: 1,
+            failDependencyDownload: true));
+
+        Assert.True(IsCached(temp.Path, failed.Binary));
+        Assert.True(IsWhollyCached(temp.Path, complete));
+
+        await InstallCacheTestSetAsync(temp.Path, next, retainedSets: 1);
+
+        Assert.True(IsWhollyCached(temp.Path, next));
+        Assert.True(IsWhollyCached(temp.Path, complete));
+        Assert.False(IsPartlyCached(temp.Path, failed));
     }
 
-    private static async Task<(string BinaryEntry, string DependencyEntry)> InstallRuntimeWithCacheAsync(
-        string localDataDirectory,
-        int retainedStaleArchiveSets)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RuntimeInstall_RejectedOrCancelledInspectionLeavesCacheUnchanged(bool cancel)
     {
-        byte[] binaryZip = CreateZip(("llama-server.exe", "server"u8.ToArray()));
-        byte[] dependencyZip = CreateZip(("cudart64_13.dll", "cuda"u8.ToArray()));
-        LlamaRuntimeVariant runtime = CreateRuntime(binaryZip, dependencyZip);
-        using var client = new HttpClient(new DelegateHandler(request =>
+        using var temp = new TempDirectory();
+        CacheTestSet baseline = CreateCacheTestSet("baseline");
+        CacheTestSet rejected = CreateCacheTestSet("rejected");
+        await InstallCacheTestSetAsync(temp.Path, baseline, retainedSets: 0);
+        Dictionary<string, (byte[] Bytes, DateTime LastWriteUtc)> before = SnapshotCache(temp.Path);
+        using var cancellation = new CancellationTokenSource();
+        ILlamaRuntimeInspector inspector = cancel
+            ? new CancellingRuntimeInspector(cancellation)
+            : new InvalidRuntimeInspector();
+
+        Exception? error = await Record.ExceptionAsync(() => InstallCacheTestSetAsync(
+            temp.Path,
+            rejected,
+            retainedSets: 0,
+            inspector: inspector,
+            cancellationToken: cancellation.Token));
+
+        Assert.IsAssignableFrom(cancel ? typeof(OperationCanceledException) : typeof(LocalAiArtifactInstallException), error);
+        Dictionary<string, (byte[] Bytes, DateTime LastWriteUtc)> after = SnapshotCache(temp.Path);
+        Assert.All(before, entry =>
         {
-            byte[] bytes = request.RequestUri!.AbsolutePath.EndsWith("runtime.zip", StringComparison.Ordinal)
-                ? binaryZip
-                : dependencyZip;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
-        }));
-        var installer = new LlamaRuntimeInstaller(
-            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true, retainedStaleArchiveSets),
-            new ValidRuntimeInspector());
-
-        await installer.InstallAsync(localDataDirectory, runtime, progress: null, CancellationToken.None);
-
-        string archivesRoot = Path.Combine(localDataDirectory, "LocalAICache", "archives");
-        string binaryEntry = Path.Combine(archivesRoot, Sha256(binaryZip));
-        string dependencyEntry = Path.Combine(archivesRoot, Sha256(dependencyZip));
-        Assert.True(File.Exists(Path.Combine(binaryEntry, "runtime.zip")));
-        Assert.True(File.Exists(Path.Combine(dependencyEntry, "dependency.zip")));
-        return (binaryEntry, dependencyEntry);
+            Assert.True(after.TryGetValue(entry.Key, out var observed), entry.Key);
+            Assert.Equal(entry.Value.Bytes, observed.Bytes);
+            Assert.Equal(entry.Value.LastWriteUtc, observed.LastWriteUtc);
+        });
+        Assert.True(IsWhollyCached(temp.Path, rejected));
+        Assert.True(LocalAiPathPolicy.TryResolve(
+            temp.Path,
+            LlamaRuntimeInstaller.Component(rejected.Runtime),
+            out LocalAiSetupPaths paths,
+            out string pathError), pathError);
+        Assert.False(Directory.Exists(paths.InstallDirectory));
     }
+
+    [Fact]
+    public async Task RuntimeInstall_KeepsArchiveSharedWithRetainedSet()
+    {
+        using var temp = new TempDirectory();
+        byte[] sharedDependency = CreateZip(("cudart64_13.dll", "shared"u8.ToArray()));
+        CacheTestSet oldest = CreateCacheTestSet("oldest", sharedDependency);
+        CacheTestSet retained = CreateCacheTestSet("retained", sharedDependency);
+        CacheTestSet current = CreateCacheTestSet("current");
+
+        foreach (CacheTestSet set in new[] { oldest, retained, current })
+            await InstallCacheTestSetAsync(temp.Path, set, retainedSets: 1);
+
+        Assert.False(IsCached(temp.Path, oldest.Binary));
+        Assert.True(IsWhollyCached(temp.Path, retained));
+        Assert.True(IsWhollyCached(temp.Path, current));
+    }
+
+    [Fact]
+    public async Task RuntimeInstall_UnusableSetRecordsNeitherCountNorFail()
+    {
+        using var temp = new TempDirectory();
+        CacheTestSet complete = CreateCacheTestSet("complete");
+        CacheTestSet current = CreateCacheTestSet("current");
+        await InstallCacheTestSetAsync(temp.Path, complete, retainedSets: 1);
+        string setsRoot = Path.Combine(temp.Path, "LocalAICache", "sets");
+        string malformed = Path.Combine(setsRoot, new string('d', 64) + ".json");
+        await File.WriteAllTextAsync(malformed, "{ not json");
+        LocalAiArchiveCacheRetention.SetMember[] missingMembers = [new(new string('e', 64), "gone.zip")];
+        string missing = Path.Combine(setsRoot, LocalAiArchiveCacheRetention.SetId(missingMembers) + ".json");
+        await File.WriteAllTextAsync(missing, System.Text.Json.JsonSerializer.Serialize(
+            new LocalAiArchiveCacheRetention.SetRecord(
+                LocalAiArchiveCacheRetention.SetRecordSchemaVersion,
+                missingMembers,
+                DateTimeOffset.UtcNow.AddYears(1))));
+
+        await InstallCacheTestSetAsync(temp.Path, current, retainedSets: 1);
+
+        Assert.True(IsWhollyCached(temp.Path, complete));
+        Assert.True(IsWhollyCached(temp.Path, current));
+        Assert.False(File.Exists(malformed));
+        Assert.False(File.Exists(missing));
+    }
+
+    private sealed record CacheTestSet(LlamaRuntimeVariant Runtime, byte[] Binary, byte[] Dependency);
+
+    /// <summary>Creates a two-archive runtime set whose pins are unique to <paramref name="tag"/>.</summary>
+    private static CacheTestSet CreateCacheTestSet(string tag, byte[]? dependency = null)
+    {
+        byte[] binary = CreateZip(("llama-server.exe", System.Text.Encoding.UTF8.GetBytes($"server-{tag}")));
+        dependency ??= CreateZip(("cudart64_13.dll", System.Text.Encoding.UTF8.GetBytes($"cuda-{tag}")));
+        return new(CreateRuntime(binary, dependency), binary, dependency);
+    }
+
+    private static async Task InstallCacheTestSetAsync(
+        string localDataDirectory,
+        CacheTestSet set,
+        int retainedSets,
+        bool failDependencyDownload = false,
+        ILlamaRuntimeInspector? inspector = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var client = new HttpClient(new DelegateHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("runtime.zip", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(set.Binary) }
+                : failDependencyDownload
+                    ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(set.Dependency) }));
+        var installer = new LlamaRuntimeInstaller(
+            new LocalAiArtifactInstaller(client, archiveCacheEnabled: true, retainedSets),
+            inspector ?? new ValidRuntimeInspector());
+
+        await installer.InstallAsync(localDataDirectory, set.Runtime, progress: null, cancellationToken);
+    }
+
+    private static string ArchivesRoot(string localDataDirectory) =>
+        Path.Combine(localDataDirectory, "LocalAICache", "archives");
+
+    private static bool IsCached(string localDataDirectory, byte[] archive) =>
+        Directory.Exists(Path.Combine(ArchivesRoot(localDataDirectory), Sha256(archive)));
+
+    private static bool IsWhollyCached(string localDataDirectory, CacheTestSet set) =>
+        IsCached(localDataDirectory, set.Binary) && IsCached(localDataDirectory, set.Dependency);
+
+    private static bool IsPartlyCached(string localDataDirectory, CacheTestSet set) =>
+        IsCached(localDataDirectory, set.Binary) || IsCached(localDataDirectory, set.Dependency);
+
+    private static Dictionary<string, (byte[] Bytes, DateTime LastWriteUtc)> SnapshotCache(string localDataDirectory) =>
+        Directory.EnumerateFiles(Path.Combine(localDataDirectory, "LocalAICache"), "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, path => (File.ReadAllBytes(path), File.GetLastWriteTimeUtc(path)));
 
     [Fact]
     public async Task RuntimeInstall_DisabledCacheNeitherReadsWritesNorPrunes()
@@ -2378,6 +2461,18 @@ public sealed class LocalAiInstallRecoveryTests
             string installDirectory,
             CancellationToken cancellationToken) =>
             Task.FromResult(new LlamaRuntimeInspection(false, "invalid", "simulated corrupted runtime"));
+    }
+
+    /// <summary>Accepts the runtime but cancels the install as inspection returns.</summary>
+    private sealed class CancellingRuntimeInspector(CancellationTokenSource cancellation) : ILlamaRuntimeInspector
+    {
+        public Task<LlamaRuntimeInspection> InspectAsync(
+            string installDirectory,
+            CancellationToken cancellationToken)
+        {
+            cancellation.Cancel();
+            return Task.FromResult(new LlamaRuntimeInspection(true, "valid", null));
+        }
     }
 
     private sealed class AcceptingModelVerifier : ILocalAiModelFileVerifier

@@ -388,14 +388,20 @@ Verified llama.cpp runtime zips are kept in
 `<LocalDataDir>\LocalAICache\archives\<sha256>\<file>`, next to the
 uninstall-owned `LocalAI` tree, so reinstalls hash-verify and extract without
 downloading. A cached zip is used only after a full SHA-256 check against the
-compiled-in pin over the same open handle that extraction reads. After each
-successful runtime install, entries for the current pins are kept along with
-the 3 most recently used older runtime sets; older entries are deleted. A set is
-every archive a runtime install pinned together (the llama.cpp binary zip and
-its CUDA dependency zip), so pruning never keeps half of an older runtime. Set
-`OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS` to a non-negative integer to
-change the number of older sets kept (`0` keeps only the current pins); other
-values are ignored with a warning. Uninstall keeps the cache, which is bounded
+compiled-in pin over the same open handle that extraction reads. A set is every
+archive a runtime install pinned together (the llama.cpp binary zip and its CUDA
+dependency zip). Only after the installed runtime passes inspection, and the
+install was not cancelled, setup records the current pins as a completed set in
+`<LocalDataDir>\LocalAICache\sets\<set-id>.json` and prunes: it keeps the current
+pins plus every archive of the 3 most recently used older completed sets, and
+deletes other entries. A rejected or cancelled install never deletes cache
+entries. Archives left by a failed acquisition stay available for a retry of the
+same pins, never count as a set, and are deleted by the next successful install
+of different pins. An archive shared by several sets stays while any kept set
+uses it. Set records are bookkeeping only: reuse is still gated by the SHA-256
+pin check. Set `OPENCLAW_SETUP_LOCAL_AI_CACHE_RETAIN_SETS` to a non-negative
+integer to change the number of older sets kept (`0` keeps only the current
+pins); other values are ignored with a warning. Uninstall keeps the cache, which is bounded
 by this retention and logged with its path so users can delete it to reclaim
 space. Set `OPENCLAW_SETUP_DISABLE_LOCAL_AI_CACHE` to any value other than `0`
 or `false` to skip all cache reads, writes, and pruning.

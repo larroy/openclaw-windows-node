@@ -114,6 +114,11 @@ internal sealed class LlamaRuntimeInstaller : ILlamaRuntimeAcquirer
                     inspection.Error ?? "The installed llama-server runtime did not pass validation.");
             }
 
+            // Commit cache retention only once the runtime is accepted and the caller has
+            // not cancelled, so a rejected install never evicts older cached runtime sets.
+            cancellationToken.ThrowIfCancellationRequested();
+            _artifactInstaller.CommitArchiveCacheSet(localDataDirectory, archives);
+
             return new LlamaRuntimeInstallResult(
                 installed.InstallDirectory,
                 Path.Combine(installed.InstallDirectory, LlamaRuntimeCatalog.ServerExecutableName),
