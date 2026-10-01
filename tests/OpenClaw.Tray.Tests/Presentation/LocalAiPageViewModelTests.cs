@@ -629,7 +629,8 @@ public sealed class LocalAiPageViewModelTests
 
         Assert.True(harness.ViewModel.ChangeModel());
 
-        Assert.Equal(1, harness.Commands.ShowLocalAiSetupCount);
+        Assert.Equal(1, harness.Commands.ShowLocalAiModelSetupCount);
+        Assert.Equal(0, harness.Commands.ShowLocalAiSetupCount);
         Assert.Equal(0, harness.Commands.ShowOnboardingCount);
         Assert.Equal(0, harness.Commands.ShowGatewayWizardCount);
     }

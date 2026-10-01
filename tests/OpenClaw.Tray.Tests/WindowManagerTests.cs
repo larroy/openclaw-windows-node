@@ -78,6 +78,17 @@ public sealed class WindowManagerTests
         var manager = ReadManager();
 
         Assert.Contains("public async Task ShowLocalAiSetupAsync()", manager);
+        Assert.Contains("public Task ShowLocalAiModelSetupAsync()", manager);
+        AssertInOrder(
+            manager,
+            "public Task ShowLocalAiModelSetupAsync()",
+            "pinInstalledModelSelection: false,",
+            "allowProvisioningFallback: false);",
+            "private async Task ShowLocalAiSetupAsync(",
+            "bool allowProvisioningFallback)",
+            "var resolution = await ResolveLocalAiSetupRouteAsync(pinInstalledModelSelection);",
+            "if (resolution.Route == LocalAiSetupRoute.Provision && allowProvisioningFallback)",
+            "await ShowLocalAiSetupRecoveryAsync(resolution.RecoveryTarget);");
         var resolver = File.ReadAllText(Path.Combine(TestRepositoryPaths.GetRepositoryRoot(), "src",
             "OpenClaw.Tray.WinUI", "Services", "LocalAiSetupRouteResolver.cs"));
         Assert.Contains("new LocalAiSetupRouteResolver(", manager);
@@ -86,9 +97,10 @@ public sealed class WindowManagerTests
         Assert.Contains("new LocalAiManifestStore(", resolver);
         Assert.Contains("install?.Manifest.ModelCatalogId", resolver);
         Assert.Contains("LocalAiSetupRoutePolicy.Decide(", resolver);
+        Assert.Contains("pinInstalledModelSelection);", resolver);
         AssertInOrder(
             manager,
-            "if (resolution.Route == LocalAiSetupRoute.Provision)",
+            "if (resolution.Route == LocalAiSetupRoute.Provision && allowProvisioningFallback)",
             "await ShowOnboardingAsync();",
             "if (resolution.Route == LocalAiSetupRoute.Blocked",
             "await ShowLocalAiSetupRecoveryAsync(");
@@ -143,6 +155,9 @@ public sealed class WindowManagerTests
         Assert.Contains("_localAiRecoveryBaseline.Restore(_config);", setupWindow);
         Assert.Contains("localAiRecoveryModelId: localAiRecoveryTarget?.ModelCatalogId", manager);
         Assert.Contains(
+            "pinLocalAiRecoveryModel: localAiRecoveryTarget?.PinModelSelection ?? false",
+            manager);
+        Assert.Contains(
             "localAiRecoveryRequestedPort: localAiRecoveryTarget?.RequestedLocalAiPort",
             manager);
 
@@ -172,6 +187,10 @@ public sealed class WindowManagerTests
         Assert.Contains(
             "LocalAiModelSelector.IsEnabled = isAvailable && !_localAiRecoveryModelPinned;",
             localAi);
+        Assert.Contains(
+            "_pinLocalAiRecoveryModel = pinLocalAiRecoveryModel &&",
+            setupWindow);
+        Assert.Contains("!string.IsNullOrWhiteSpace(localAiRecoveryModelId);", setupWindow);
         Assert.Contains(
             "LocalAiToggle.IsEnabled = isAvailable && !_localAiRecoveryOnly;",
             localAi);
