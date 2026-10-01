@@ -702,7 +702,7 @@ internal sealed class WindowManager : IWindowManager
     }
 
     private ISetupLocalAiHost CreateLocalAiSetupHost() => new SetupLocalAiHost(
-        ResolveLocalAiSetupRouteAsync, _callbacks.GetGatewayRegistry, _callbacks.GetLocalAiRuntime,
+        () => ResolveLocalAiSetupRouteAsync(), _callbacks.GetGatewayRegistry, _callbacks.GetLocalAiRuntime,
         ct => new LocalAiManifestStore(new(AppIdentity.ResolveSetupLocalDataDirectory())).LoadAsync(ct),
         LocalAiInstallationObservation.InspectAsync,
         ct => Task.Run(() => new OpenClaw.Shared.Inference.CudaHostHardwareProbe().Probe(), ct).WaitAsync(ct),

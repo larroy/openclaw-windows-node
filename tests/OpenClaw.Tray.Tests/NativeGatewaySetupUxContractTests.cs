@@ -421,7 +421,7 @@ public sealed class NativeGatewaySetupUxContractTests
         var root = TestRepositoryPaths.GetRepositoryRoot();
         var manager = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Services", "WindowManager.cs"));
         var start = manager.IndexOf("public Task ShowLocalAiModelSetupAsync()", StringComparison.Ordinal);
-        var route = manager[start..manager.IndexOf("private async Task ShowLocalAiSetupAsync(", start, StringComparison.Ordinal)];
+        var route = manager[start..manager.IndexOf("private async Task<LocalAiSetupResolution>", start, StringComparison.Ordinal)];
         Assert.Contains("NativeGatewayPackageClient.IsolatedContract", route);
         Assert.Contains("pinInstalledModelSelection: false", route);
         Assert.Contains("allowProvisioningFallback: false", route);
