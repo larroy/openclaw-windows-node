@@ -232,6 +232,40 @@ internal sealed class LocalAiArtifactInstaller
 
     public event EventHandler<LocalAiArtifactInstallProgress>? ProgressChanged;
 
+    /// <summary>
+    /// Acquires every pinned archive, extracts them into one per-run staging directory,
+    /// and atomically promotes it to the component's install directory.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each archive is served from the archive cache when a cached copy passes the full
+    /// SHA-256 check against its pin. Otherwise it is downloaded, verified while
+    /// streaming, extracted, and then moved into the cache for later installs. This
+    /// method only reads and fills the cache; it never prunes it. The caller must call
+    /// <see cref="CommitArchiveCacheSet"/> once it accepts the installed component.
+    /// </para>
+    /// <para>
+    /// The install directory must not exist yet: an existing install is never replaced.
+    /// On failure or cancellation, partial downloads and the unpromoted staging directory
+    /// are removed, and nothing is promoted. Archives already cached during this run are
+    /// kept for a retry. After a successful return, the caller owns
+    /// <see cref="LocalAiArtifactInstallResult.Rollback"/> and must remove that directory
+    /// if it later rejects the install.
+    /// </para>
+    /// </remarks>
+    /// <param name="localDataDirectory">App-owned local data root that contains the Local AI tree and the archive cache.</param>
+    /// <param name="component">Identity that determines the install directory.</param>
+    /// <param name="archives">Pinned archives, extracted in order into the same staging directory.</param>
+    /// <param name="progress">Optional per-phase progress observer, in addition to <see cref="ProgressChanged"/>.</param>
+    /// <param name="cancellationToken">Cancels downloads, verification, and extraction.</param>
+    /// <returns>The promoted install, the verified archives, and the number of archives reused from the cache.</returns>
+    /// <exception cref="ArgumentException">The archive set is empty, duplicated, or has an invalid pin.</exception>
+    /// <exception cref="LocalAiArtifactInstallException">
+    /// A path fails containment or reparse-point checks, the install directory already exists,
+    /// a download returns an error status, an archive fails its size or hash pin, or an
+    /// archive is not a safe ZIP.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public async Task<LocalAiArtifactInstallResult> InstallAsync(
         string localDataDirectory,
         LocalAiComponentIdentity component,
