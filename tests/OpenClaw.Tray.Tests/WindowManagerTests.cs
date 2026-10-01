@@ -203,6 +203,52 @@ public sealed class WindowManagerTests
     }
 
     [Fact]
+    public void ConstructorStartedLocalAiRecovery_ContinuesAndCancelsWithoutGenericGatewayReview()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var setupWindow = File.ReadAllText(Path.Combine(
+            root, "src", "OpenClaw.SetupEngine.UI", "SetupWindow.xaml.cs"));
+        var detail = File.ReadAllText(Path.Combine(
+            root, "src", "OpenClaw.SetupEngine.UI", "Pages", "GatewaySetupDetailPage.xaml.cs"));
+
+        Assert.DoesNotContain("SetupWindow.Active?.IsAiLocalReview", detail);
+        Assert.Contains("SetupWindow.Active?.IsLocalAiRecovery", detail);
+        AssertInOrder(
+            setupWindow,
+            "internal Task InstallReviewedLocalAiAsync()",
+            "if (_localAiReviewSelection is null)",
+            "if (_startAtLocalAiRecoveryReview)",
+            "NavigateToProgress();");
+        AssertInOrder(
+            setupWindow,
+            "public void NavigateToProgress()",
+            "if (!AccessDraft.CanInstall(_startAtLocalAiRecoveryReview))",
+            "return;",
+            "NavigateTo(typeof(ProgressPage)");
+        AssertInOrder(
+            setupWindow,
+            "internal void CancelLocalAiReview()",
+            "if (_localAiReviewSelection is null)",
+            "if (_startAtLocalAiRecoveryReview)",
+            "ResetLocalAiRecoveryMode();",
+            "Close();");
+        AssertInOrder(
+            detail,
+            "private void Back_Click(object sender, RoutedEventArgs e)",
+            "if (_args is { Detail: GatewaySetupDetail.Networking } networking)",
+            "if (networking.ReturnToReview)",
+            "SetupWindow.Active?.NavigateToGatewaySetup(back: true);",
+            "SetupWindow.Active?.NavigateToLocalAiSetup(back: true);",
+            "SetupWindow.Active?.IsLocalAiRecovery == true",
+            "SetupWindow.Active.CancelLocalAiReview();");
+        AssertInOrder(
+            detail,
+            "private async Task PrimaryAsync(object sender, RoutedEventArgs e)",
+            "SetupWindow.Active?.IsLocalAiRecovery != true",
+            "await SetupWindow.Active.InstallReviewedLocalAiAsync();");
+    }
+
+    [Fact]
     public void CloseForShutdown_GatesCreationAndClosesOwnedWindowsOnce()
     {
         var manager = ReadManager();
