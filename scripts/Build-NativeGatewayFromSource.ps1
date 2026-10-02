@@ -17,6 +17,9 @@
     artifacts\local-package, so neither may be deleted while the package is registered.
     The Gateway runs as a separate isolated agent account, which must be able to read both,
     including every parent directory. Neither may be under your user profile.
+    New work directories grant other authenticated accounts read/execute only. Existing
+    writable trees or replaceable ancestors are rejected without modifying their permissions.
+    Only one source build or unregister may run on this machine at a time.
 
     Requires Windows Developer Mode, git, the .NET SDK and Visual Studio Build Tools needed by
     the packaging repo, and (for source builds) Node.js and pnpm matching the source's
@@ -100,6 +103,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'NativeGatewaySourceBuild.psm1') -Force
 
 $openClawUrl = 'https://github.com/openclaw/openclaw.git'
 $packagingUrl = 'https://github.com/openclaw/openclaw-windows-packaging.git'
@@ -200,10 +204,12 @@ if (-not $Unregister) {
 
 # --- Unregister ------------------------------------------------------------------------------
 
+Invoke-NativeGatewaySourceBuildLocked {
 if ($Unregister) {
     if (-not (Test-Path -LiteralPath $deployScript -PathType Leaf)) {
         throw "Deploy-LocalPackage.ps1 was not found under '$packagingRoot'. Pass -PackagingDirectory with the packaging checkout used to register the patch."
     }
+    Assert-NativeGatewayTreeAcl $packagingRoot
     $registered = @(Get-AppxPackage -Name $packageName)
     if ($registered.Count -gt 0) {
         # Check ownership before teardown so a registration Deploy-LocalPackage will refuse to
@@ -225,6 +231,11 @@ if ($Unregister) {
     return
 }
 
+Initialize-NativeGatewayDirectory $WorkRoot
+if (Test-Path -LiteralPath $packagingRoot) {
+    Assert-NativeGatewayTreeAcl $packagingRoot
+}
+
 # --- Build: tools ------------------------------------------------------------------------------
 
 Assert-Command 'git' 'Install Git for Windows.'
@@ -237,8 +248,6 @@ $nodeTarget = Get-NativeOutput 'node -p' { node -p "process.platform + '/' + pro
 if ($nodeTarget -cne "win32/$Architecture") {
     throw "Node.js must be win32/$Architecture to build the $Architecture payload; found $nodeTarget."
 }
-
-New-Item -ItemType Directory -Force -Path $WorkRoot | Out-Null
 
 # --- Build: packaging checkout -----------------------------------------------------------------
 
@@ -259,11 +268,12 @@ $dirty = $false
 $packageSha = $null
 if ($OpenClawPackageDirectory) {
     $packageDir = (Resolve-Path -LiteralPath $OpenClawPackageDirectory).Path
-    $sourceJson = Get-Content -LiteralPath (Join-Path $packageDir 'source.json') -Raw | ConvertFrom-Json
+    Assert-NativeGatewayTreeAcl $packageDir
+    $sourceJson = Read-NativeGatewaySourceMetadata $packageDir
     $commit = ([string]$sourceJson.resolvedCommit).Trim().ToLowerInvariant()
     $version = [string]$sourceJson.packageVersion
     # Keep the producer's requested ref: Test-OpenClawPackage.ps1 rewrites it into source.json.
-    $requestedRef = if ($sourceJson.PSObject.Properties.Name -contains 'requestedRef' -and $sourceJson.requestedRef) {
+    $requestedRef = if ($sourceJson.Contains('requestedRef') -and $sourceJson.requestedRef) {
         [string]$sourceJson.requestedRef
     }
     else {
@@ -274,6 +284,7 @@ if ($OpenClawPackageDirectory) {
 else {
     if ($OpenClawSourceDirectory) {
         $sourceRoot = (Resolve-Path -LiteralPath $OpenClawSourceDirectory).Path
+        Assert-NativeGatewayTreeAcl $sourceRoot
         $status = & git -C $sourceRoot status --porcelain
         Assert-ExitCode "git status in $sourceRoot"
         $dirty = [bool]$status
@@ -283,6 +294,9 @@ else {
     }
     else {
         $sourceRoot = Join-Path $WorkRoot 'openclaw'
+        if (Test-Path -LiteralPath $sourceRoot) {
+            Assert-NativeGatewayTreeAcl $sourceRoot
+        }
         Sync-Checkout $openClawUrl $sourceRoot $OpenClawRef
     }
 
@@ -320,9 +334,11 @@ else {
     $baseId
 }
 $payloadDir = Join-Path $WorkRoot "payloads\$Architecture\$payloadId"
+Initialize-NativeGatewayDirectory (Split-Path $payloadDir -Parent)
 
 $reuse = $false
 if (Test-Path -LiteralPath $payloadDir) {
+    Assert-NativeGatewayTreeAcl $payloadDir
     $metadataPath = Join-Path $payloadDir 'payload-metadata.json'
     $metadata = if (Test-Path -LiteralPath $metadataPath -PathType Leaf) {
         Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
@@ -341,8 +357,10 @@ if (-not $reuse) {
     # --- Build: package (openclaw.tgz + source.json) ---------------------------------------------
 
     if (-not $OpenClawPackageDirectory) {
+        Initialize-NativeGatewayDirectory (Join-Path $WorkRoot 'packages')
         $packageDir = Join-Path $WorkRoot "packages\$payloadId"
         if (Test-Path -LiteralPath $packageDir) {
+            Assert-NativeGatewayTreeAcl $packageDir
             Remove-Item -LiteralPath $packageDir -Recurse -Force
         }
         New-Item -ItemType Directory -Path $packageDir | Out-Null
@@ -381,8 +399,8 @@ if (-not $reuse) {
 
     # --- Build: payload ----------------------------------------------------------------------------
 
-    $runnerTemp = Join-Path $WorkRoot 'temp'
-    New-Item -ItemType Directory -Force -Path $runnerTemp | Out-Null
+    $runnerTemp = Join-Path $WorkRoot ('temp-' + [guid]::NewGuid().ToString('N'))
+    Initialize-NativeGatewayDirectory $runnerTemp
     $previousRunnerTemp = $env:RUNNER_TEMP
     try {
         $env:RUNNER_TEMP = $runnerTemp
@@ -398,6 +416,7 @@ if (-not $reuse) {
     }
     finally {
         $env:RUNNER_TEMP = $previousRunnerTemp
+        Remove-Item -LiteralPath $runnerTemp -Recurse -Force
     }
 }
 
@@ -430,3 +449,4 @@ Write-Host ''
 Write-Host "To use it in Companion, start Companion from a shell with: `$env:OPENCLAW_NATIVE_GATEWAY_DEV_PATCH = '$Patch'"
 Write-Host 'Then choose the local native Gateway in setup. Without this variable Companion keeps using the Microsoft Store Gateway.'
 Write-Host "Do not delete $WorkRoot or $packagingRoot while registered. Remove with: .\scripts\Build-NativeGatewayFromSource.ps1 -Unregister -Patch $Patch"
+}

@@ -98,6 +98,10 @@ jobs:
       shell: pwsh
       run: ./scripts/test-agent-skills-validator.ps1
 
+    - name: Test native Gateway source build safety
+      shell: pwsh
+      run: ./scripts/test-native-gateway-source-build.ps1
+
     - name: Validate CI change classifier
       shell: pwsh
       run: ./scripts/test-ci-change-classifier.ps1

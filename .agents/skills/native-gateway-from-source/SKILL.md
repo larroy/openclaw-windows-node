@@ -42,12 +42,20 @@ pwsh -File .\scripts\Build-NativeGatewayFromSource.ps1 -OpenClawRef main -Patch 
 - `main` of both repos moves often. Each rerun fetches them again; a new commit in either
   repo builds and re-registers a new payload. To get a reproducible rerun, pin both:
   `-OpenClawRef <full sha> -PackagingRef <full sha>`. A pinned rerun prints
-  `Reusing payload` and `Already up to date` in seconds.
+  `Reusing payload` and `Already up to date` without rebuilding. ACL validation still
+  walks the checkouts and selected payload; large dependency trees take longer.
 - Other sources: `-OpenClawSourceDirectory <checkout>` builds a local checkout as-is
   (uncommitted changes allowed, always a fresh payload). `-OpenClawPackageDirectory <dir>`
   takes an existing `openclaw.tgz` + `source.json` and only builds the payload (about
   2 to 3 minutes); previous builds leave these under `<WorkRoot>\packages\<id>`.
 - `-Force` builds a new payload and re-registers even when nothing changed.
+- Relative `-WorkRoot` paths are anchored to the invoking PowerShell location before
+  any directory changes.
+- Only one source build or unregister can run on a machine at a time, even across
+  different patches and work roots. A concurrent invocation fails before changing files.
+  Payload installation also uses a fresh per-run staging directory, removed on exit.
+- Prebuilt packages must include valid commit/hash/version metadata. The archive hash
+  is checked before payload-cache reuse, not just on a fresh build.
 
 Verify the registration:
 
@@ -99,6 +107,16 @@ refuses before teardown.
   under `C:\Users\<you>` Node fails with `EPERM ... lstat 'C:\Users\<you>\AppData'` and setup
   reports "OpenClaw could not read the effective Gateway configuration". The script refuses
   such paths. Do not "fix" it with ACL grants.
+- **Build trees must not be writable by other accounts.** Newly created work directories
+  have protected ACLs: the current user, Administrators and SYSTEM can write; other
+  authenticated accounts, Users and application-package groups get read/execute only.
+  Existing trees, supplied checkouts and
+  prebuilt packages are checked, including linked targets and replaceable ancestors.
+  Unsafe paths are rejected without changing their ACLs. Use a fresh root under a trusted
+  parent (for example `C:\OpenClawSourceSafe`), not another child of an unsafe directory.
+  For an existing registration, have an administrator verify its files and repair its
+  permissions before retrying unregister. Do not execute potentially modified aliases
+  merely to bypass the check.
 - **Never move or delete the work root while registered.** The layout links the payload with a
   junction. Moving keeps the old ACLs (the agent account loses access); `icacls /reset /T`
   over the openclaw checkout loops through pnpm symlinks for a long time. Unregister, then
@@ -122,6 +140,9 @@ refuses before teardown.
 | `OPENCLAW_NATIVE_GATEWAY_DEV_PATCH must be 1 to 15 letters ...` | Invalid variable value | Use lowercase letters, digits, hyphens |
 | `-WorkRoot '...' is inside your user profile ...` | Profile path passed | Use a path such as `C:\OpenClawDev` |
 | `The package-qualified aliases were not found ...` | App execution aliases disabled | Enable them in Settings > Apps > Advanced app settings > App execution aliases |
+| `Another native Gateway source build or unregister is running ...` | Shared build/registration resources are locked | Wait for that operation to finish, then retry |
+| `Native Gateway build path ... grants write or replacement access ...` | Another account can modify code or replace a parent | Use a fresh root under a trusted parent, or have an administrator verify and repair the existing tree |
+| `Prebuilt package metadata ... requires ...` | Missing, malformed or truncated provenance | Recreate `source.json` with the package producer; do not invent hashes |
 
 ## Proof for PRs
 
