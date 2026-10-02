@@ -194,7 +194,11 @@ runtime-contract change. Keeping the draft changes nothing. Confirming replaces
 only its descriptor with a new profile for the installed package; old workspace
 files, configuration and credentials are preserved. Published profiles cannot
 be discarded through this recovery.
-No local MSIX path or environment-variable configuration is required.
+No local MSIX path or environment-variable configuration is required. To test a
+Gateway built from `openclaw/openclaw` source instead, register it with
+`scripts\Build-NativeGatewayFromSource.ps1 -Patch <patch>` and start Companion with
+`OPENCLAW_NATIVE_GATEWAY_DEV_PATCH=<patch>`. Native setup then uses only
+`OpenClawFoundation.OpenClawGateway-<patch>` and never falls back to the Store or WinGet.
 The original `OpenClaw.Gateway` / OpenClaw Foundation development publisher pair
 is still accepted for existing installations. If both identities are installed,
 new setup reports duplicate registrations instead of guessing which to use. Existing

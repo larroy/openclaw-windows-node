@@ -586,8 +586,10 @@ public sealed class NativeGatewaySetupUxContractTests
             "NativeGatewayPackageResolver.cs");
         var source = File.ReadAllText(path);
         Assert.Contains("FindPackagesForUser(string.Empty)", source);
-        Assert.Contains("NativeGatewayPackageIdentity.IsTrusted(package.Id.Name, package.Id.Publisher)", source);
-        Assert.Contains("(expectedFamily is null || package.Id.FamilyName == expectedFamily)", source);
+        // Trust gating: new setup and saved-profile resolution both go through the identity policy.
+        Assert.Contains("NativeGatewayPackageIdentity.IsSelectable(package.Id.Name, package.Id.Publisher, devPatch)", source);
+        Assert.Contains("NativeGatewayPackageIdentity.IsResolvable(package.Id.Name, package.Id.Publisher, devPatch)", source);
+        Assert.Contains("package.Id.FamilyName == expectedFamily", source);
         Assert.Contains("ResolveCoreAsync(null, cancellationToken)", source);
         Assert.Contains("ResolveCoreAsync(expectedFamily, cancellationToken)", source);
         Assert.Contains("packages.Length > 1", source);
