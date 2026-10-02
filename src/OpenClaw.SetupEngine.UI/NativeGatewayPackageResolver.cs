@@ -45,12 +45,19 @@ public sealed class NativeGatewayPackageResolver : INativeGatewayPackageResolver
             {
                 // Not NativeGatewayPackageNotInstalledException: an opted-in dev patch must never fall back to WinGet,
                 // and the Store cannot install a patched identity a saved profile is bound to.
-                if (devPatch is not null && (expectedFamily is null || TryGetFamilyDevPatch(expectedFamily, out _)))
+                if (devPatch is not null && expectedFamily is null)
                     throw new InvalidOperationException(
                         $"The development Gateway package {NativeGatewayPackageIdentity.GetDevPatchPackageName(devPatch)} " +
                         "is not registered for this Windows user. " +
                         $"Run scripts\\Build-NativeGatewayFromSource.ps1 -Patch {devPatch}, or clear " +
                         $"{NativeGatewayPackageIdentity.DevPatchEnvironmentVariable} to use the Microsoft Store Gateway.");
+                // Clearing the variable cannot help here: the saved profile stays pinned to the patched family.
+                if (devPatch is not null && TryGetFamilyDevPatch(expectedFamily, out _))
+                    throw new InvalidOperationException(
+                        $"This Gateway profile uses the development Gateway package {NativeGatewayPackageIdentity.GetDevPatchPackageName(devPatch)}, " +
+                        "which is not registered for this Windows user. " +
+                        $"Run scripts\\Build-NativeGatewayFromSource.ps1 -Patch {devPatch} to register it again, " +
+                        "or remove this gateway in Connection settings and set up a new one.");
                 throw new NativeGatewayPackageNotInstalledException();
             }
             if (packages.Length > 1)
