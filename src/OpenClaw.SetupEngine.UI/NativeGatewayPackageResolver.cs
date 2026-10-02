@@ -36,10 +36,8 @@ public sealed class NativeGatewayPackageResolver : INativeGatewayPackageResolver
 
             var packages = new PackageManager().FindPackagesForUser(string.Empty)
                 .Where(package => !package.IsFramework && !package.IsResourcePackage &&
-                    (expectedFamily is null
-                        ? NativeGatewayPackageIdentity.IsSelectable(package.Id.Name, package.Id.Publisher, devPatch)
-                        : NativeGatewayPackageIdentity.IsResolvable(package.Id.Name, package.Id.Publisher, devPatch) &&
-                            package.Id.FamilyName == expectedFamily))
+                    NativeGatewayPackageIdentity.IsCandidate(
+                        package.Id.Name, package.Id.Publisher, package.Id.FamilyName, expectedFamily, devPatch))
                 .ToArray();
             if (packages.Length == 0)
             {

@@ -22,6 +22,26 @@ public sealed class NativeGatewayPackageIdentityTests
 
     private const string Patched = "OpenClawFoundation.OpenClawGateway-source";
     private const string PatchedFamily = Patched + "_rfcbke2p71se2";
+    private const string StoreFamily = NativeGatewayPackageIdentity.StoreName + "_rfcbke2p71se2";
+
+    // Together these rows fail if the new-setup and saved-profile predicates are swapped, or if the
+    // exact-family check is dropped from saved profiles or applied to new setup.
+    [Theory]
+    // New setup while opted in selects only the patch, never the Store package.
+    [InlineData(NativeGatewayPackageIdentity.StoreName, StoreFamily, null, "source", false)]
+    [InlineData(Patched, PatchedFamily, null, "source", true)]
+    // New setup without an opt-in selects the Store package; no family is expected.
+    [InlineData(NativeGatewayPackageIdentity.StoreName, StoreFamily, null, null, true)]
+    // A saved Store profile keeps resolving while opted in.
+    [InlineData(NativeGatewayPackageIdentity.StoreName, StoreFamily, StoreFamily, "source", true)]
+    // A saved profile resolves only its exact family.
+    [InlineData(Patched, PatchedFamily, StoreFamily, "source", false)]
+    [InlineData(NativeGatewayPackageIdentity.StoreName, StoreFamily, PatchedFamily, "source", false)]
+    public void IsCandidate_UsesSelectionForNewSetupAndExactResolutionForSavedProfiles(
+        string name, string family, string? expectedFamily, string? devPatch, bool expected) =>
+        Assert.Equal(expected, NativeGatewayPackageIdentity.IsCandidate(
+            name, NativeGatewayPackageIdentity.StorePublisher, family, expectedFamily, devPatch));
+
 
     [Theory]
     [InlineData(null)]

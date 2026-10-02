@@ -72,6 +72,16 @@ public static class NativeGatewayPackageIdentity
         IsTrusted(name, publisher) ||
         (devPatch is not null && name == GetDevPatchPackageName(devPatch) && publisher == StorePublisher);
 
+    /// <summary>
+    /// Resolver filter for one registered package. New setup (<paramref name="expectedFamily"/> null) uses
+    /// <see cref="IsSelectable"/>; a saved profile uses <see cref="IsResolvable"/> and its exact family.
+    /// </summary>
+    public static bool IsCandidate(
+        string name, string publisher, string familyName, string? expectedFamily, string? devPatch) =>
+        expectedFamily is null
+            ? IsSelectable(name, publisher, devPatch)
+            : IsResolvable(name, publisher, devPatch) && familyName == expectedFamily;
+
     /// <summary>"openclaw"/"clawctl" plus "-&lt;patch&gt;" for patched names; ".exe" appended.</summary>
     /// <exception cref="ArgumentException">command is not "openclaw" or "clawctl".</exception>
     public static string GetAliasFileName(string packageName, string command)

@@ -586,10 +586,13 @@ public sealed class NativeGatewaySetupUxContractTests
             "NativeGatewayPackageResolver.cs");
         var source = File.ReadAllText(path);
         Assert.Contains("FindPackagesForUser(string.Empty)", source);
-        // Trust gating: new setup and saved-profile resolution both go through the identity policy.
-        Assert.Contains("NativeGatewayPackageIdentity.IsSelectable(package.Id.Name, package.Id.Publisher, devPatch)", source);
-        Assert.Contains("NativeGatewayPackageIdentity.IsResolvable(package.Id.Name, package.Id.Publisher, devPatch)", source);
-        Assert.Contains("package.Id.FamilyName == expectedFamily", source);
+        // Trust gating and branch selection live in NativeGatewayPackageIdentity.IsCandidate (behavior-tested
+        // in OpenClaw.Connection.Tests); the resolver must apply it to every registered package.
+        Assert.Contains(
+            "NativeGatewayPackageIdentity.IsCandidate( package.Id.Name, package.Id.Publisher, package.Id.FamilyName, expectedFamily, devPatch)",
+            System.Text.RegularExpressions.Regex.Replace(source, @"\s+", " "));
+        Assert.DoesNotContain("NativeGatewayPackageIdentity.IsSelectable(", source);
+        Assert.DoesNotContain("NativeGatewayPackageIdentity.IsResolvable(", source);
         Assert.Contains("ResolveCoreAsync(null, cancellationToken)", source);
         Assert.Contains("ResolveCoreAsync(expectedFamily, cancellationToken)", source);
         Assert.Contains("packages.Length > 1", source);
