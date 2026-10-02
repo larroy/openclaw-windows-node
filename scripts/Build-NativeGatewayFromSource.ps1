@@ -180,6 +180,11 @@ if (-not $Architecture) {
     }
 }
 
+# Anchor every derived path to one absolute root: native tools resolve relative paths against
+# their own working directory (the OpenClaw checkout during packaging), not the caller's.
+# Resolves against the PowerShell location, which .NET's GetFullPath does not track.
+$WorkRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkRoot)
+
 $packageName = "OpenClawFoundation.OpenClawGateway-$Patch"
 $packagingRoot = if ($PackagingDirectory) {
     (Resolve-Path -LiteralPath $PackagingDirectory).Path
