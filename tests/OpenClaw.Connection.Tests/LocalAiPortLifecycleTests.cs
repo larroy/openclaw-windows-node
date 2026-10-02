@@ -3412,7 +3412,7 @@ public sealed class LocalAiPortLifecycleTests
         }
     }
 
-    private static LocalAiInstallManifest ValidManifest()
+    internal static LocalAiInstallManifest ValidManifest()
     {
         LlamaRuntimeVariant runtime = LlamaRuntimeCatalog.Find(
             System.Runtime.InteropServices.Architecture.Arm64)!;
