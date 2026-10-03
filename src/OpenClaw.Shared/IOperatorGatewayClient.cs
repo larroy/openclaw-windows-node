@@ -192,6 +192,9 @@ public interface IOperatorGatewayClient
             IsSupported = false,
             Error = "sessions.create is not supported by this gateway client."
         });
+    /// <summary>List only the archived sessions (<c>sessions.list</c> with <c>archived:true</c>). Rows are detached snapshots.</summary>
+    Task<SessionListResult> ListArchivedSessionsAsync(int timeoutMs = 15000)
+        => Task.FromResult(new SessionListResult { IsSupported = false });
 }
 
 public sealed record CronRunRequestResult(

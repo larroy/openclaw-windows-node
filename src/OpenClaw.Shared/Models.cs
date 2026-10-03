@@ -309,6 +309,11 @@ public class SessionInfo
     /// older Gateway did not provide the field, so callers may use legacy status.
     /// </summary>
     public bool? HasActiveRun { get; set; }
+    public bool Pinned { get; set; }
+    public long? PinnedAt { get; set; }
+    public bool Unread { get; set; }
+    public long? MarkedUnreadAt { get; set; }
+    public bool Archived { get; set; }
     public long InputTokens { get; set; }
     public long OutputTokens { get; set; }
     public long TotalTokens { get; set; }

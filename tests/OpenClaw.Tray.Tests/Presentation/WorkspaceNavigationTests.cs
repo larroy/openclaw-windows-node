@@ -740,6 +740,59 @@ public sealed class WorkspaceNavigationTests
         Assert.Equal(key, Assert.Single(WorkspaceProjection.Agents(agents.RootElement, sessions)).LatestSessionKey);
     }
 
+    [Fact]
+    public void Projection_PinnedSessionsSortFirstAndArchivedRowsHidden()
+    {
+        var sessions = new[]
+        {
+            new SessionInfo { Key = "agent:main:unpinned-newer", UpdatedAt = new DateTime(2026, 3, 1) },
+            new SessionInfo { Key = "agent:main:pinned-older", UpdatedAt = new DateTime(2026, 1, 1), Pinned = true, PinnedAt = 100 },
+            new SessionInfo { Key = "agent:main:pinned-newer", UpdatedAt = new DateTime(2026, 2, 1), Pinned = true, PinnedAt = 200 },
+            new SessionInfo { Key = "agent:main:unpinned-older", UpdatedAt = new DateTime(2026, 2, 15) },
+            new SessionInfo { Key = "agent:main:archived", UpdatedAt = new DateTime(2026, 4, 1), Archived = true },
+        };
+
+        var visible = WorkspaceProjection.Sessions(sessions, null);
+
+        Assert.Equal(
+            new[] { "agent:main:pinned-newer", "agent:main:pinned-older", "agent:main:unpinned-newer", "agent:main:unpinned-older" },
+            visible.Select(s => s.Key));
+        Assert.True(visible[0].IsPinned);
+        Assert.False(visible[2].IsPinned);
+        Assert.DoesNotContain(visible, s => s.IsArchived);
+    }
+
+    [Fact]
+    public void Projection_LatestSessionKeyIgnoresPinnedOrderingAndArchivedRows()
+    {
+        using var agents = JsonDocument.Parse("""{"agents":[{"id":"main"}]}""");
+        var sessions = new[]
+        {
+            new SessionInfo { Key = "agent:main:pinned-but-old", UpdatedAt = new DateTime(2026, 1, 1), Pinned = true, PinnedAt = 900 },
+            new SessionInfo { Key = "agent:main:latest", UpdatedAt = new DateTime(2026, 5, 1) },
+            new SessionInfo { Key = "agent:main:archived-newest", UpdatedAt = new DateTime(2026, 6, 1), Archived = true },
+        };
+
+        Assert.Equal("agent:main:latest", Assert.Single(WorkspaceProjection.Agents(agents.RootElement, sessions)).LatestSessionKey);
+    }
+
+    [Fact]
+    public void Projection_ArchivedSessionsProjectArchivedRows()
+    {
+        var sessions = new[]
+        {
+            new SessionInfo { Key = "agent:main:archived", UpdatedAt = new DateTime(2026, 3, 1), Archived = true, Unread = true, Pinned = true },
+        };
+
+        var archived = WorkspaceProjection.ArchivedSessions(sessions, null);
+
+        var row = Assert.Single(archived);
+        Assert.Equal("agent:main:archived", row.Key);
+        Assert.True(row.IsArchived);
+        Assert.False(row.IsPinned);
+        Assert.False(row.IsUnread);
+    }
+
     private static string Source(string folder, string file) =>
         Path.Combine(TestRepositoryPaths.GetRepositoryRoot(), "src", "OpenClaw.Tray.WinUI", folder, file);
 }

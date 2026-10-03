@@ -5,7 +5,8 @@ using OpenClawTray.Services;
 namespace OpenClawTray.Presentation;
 
 internal sealed record WorkspaceAgent(string Id, string Name, string? LatestSessionKey, string? Emoji = null, string? AvatarUrl = null);
-internal sealed record WorkspaceSession(string Key, string Title, string? AgentId);
+internal sealed record WorkspaceSession(string Key, string Title, string? AgentId,
+    bool IsPinned = false, bool IsUnread = false, bool IsArchived = false);
 
 internal static class WorkspaceProjection
 {
@@ -22,7 +23,7 @@ internal static class WorkspaceProjection
                 var id = ReadString(agent, "id") ?? string.Empty;
                 var identity = agent.TryGetProperty("identity", out var value) && value.ValueKind == JsonValueKind.Object
                     ? value : default;
-                var related = Sessions(sessions, id);
+                var related = Visible(sessions, id);
                 return new WorkspaceAgent(
                     id, ReadString(identity, "name") ?? ReadString(agent, "name") ?? id,
                     related.FirstOrDefault()?.Key, ReadString(identity, "emoji"),
@@ -60,13 +61,40 @@ internal static class WorkspaceProjection
     public static IReadOnlyList<WorkspaceSession> Sessions(IEnumerable<SessionInfo> source, string? agentId)
     {
         // A completed run leaves a reusable conversation, not a finished sidebar item.
+        // Pinned rows come first (most recently pinned on top); LINQ ordering is
+        // stable, so unpinned rows keep updatedAt order.
+        var sessions = Visible(source, agentId)
+            .OrderByDescending(s => s.Pinned)
+            .ThenByDescending(s => s.Pinned ? s.PinnedAt ?? 0 : 0)
+            .ToArray();
+        return Project(sessions, archived: false);
+    }
+
+    /// <summary>Archived-only rows, already filtered by the gateway's archived list.</summary>
+    public static IReadOnlyList<WorkspaceSession> ArchivedSessions(IEnumerable<SessionInfo> source, string? agentId)
+    {
         var sessions = source
             .Where(session => !SessionDisplayResolver.IsBackground(session) &&
                 (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)))
             .OrderByDescending(session => session.UpdatedAt)
             .ToArray();
+        return Project(sessions, archived: true);
+    }
+
+    // The active sidebar hides archived rows; the archived section must never
+    // influence the "latest session" per agent.
+    private static IEnumerable<SessionInfo> Visible(IEnumerable<SessionInfo> source, string? agentId) =>
+        source
+            .Where(session => !session.Archived &&
+                !SessionDisplayResolver.IsBackground(session) &&
+                (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)))
+            .OrderByDescending(session => session.UpdatedAt);
+
+    private static IReadOnlyList<WorkspaceSession> Project(SessionInfo[] sessions, bool archived)
+    {
         var titles = SessionTitleFormatter.FormatUnique(sessions);
         return sessions.Select((session, index) => new WorkspaceSession(
-            session.Key, titles[index], SessionDisplayResolver.Resolve(session).AgentId)).ToArray();
+            session.Key, titles[index], SessionDisplayResolver.Resolve(session).AgentId,
+            session.Pinned && !archived, session.Unread && !archived, archived)).ToArray();
     }
 }

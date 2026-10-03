@@ -281,6 +281,12 @@ public partial class OpenClawGatewayClient
             parameters["emitCommandHooks"] = request.EmitCommandHooks;
             if (!string.IsNullOrWhiteSpace(request.ParentSessionKey))
                 parameters["parentSessionKey"] = request.ParentSessionKey;
+            if (request.Fork)
+            {
+                parameters["fork"] = true;
+                if (!string.IsNullOrWhiteSpace(request.ForkFrom))
+                    parameters["forkFrom"] = request.ForkFrom;
+            }
         }
 
         if (!legacyLifecycleFallback && request.SucceedsParent.HasValue)
@@ -471,6 +477,42 @@ public partial class OpenClawGatewayClient
         if (string.IsNullOrWhiteSpace(key)) return Task.FromResult(false);
         if (patch is null || !patch.HasChanges) return Task.FromResult(false);
         return TrySendTrackedRequestAsync("sessions.patch", patch.ToPayload(key));
+    }
+
+    // ── sessions.list (archived) ──
+
+    /// <summary>
+    /// Fetches only the archived sessions (<c>sessions.list</c> with
+    /// <c>archived:true</c>). Rows are detached: they never touch the live
+    /// session tracking, so they must be consumed as a snapshot. Unsupported or
+    /// pre-handshake gateways return <c>IsSupported = false</c>; other request
+    /// failures propagate.
+    /// </summary>
+    public async Task<SessionListResult> ListArchivedSessionsAsync(int timeoutMs = 15000)
+    {
+        var payload = await TryRequestPayloadAsync("sessions.list", new { archived = true }, timeoutMs).ConfigureAwait(false);
+        if (payload is null) return new SessionListResult { IsSupported = false };
+        return new SessionListResult { Sessions = ParseDetachedSessionRows(payload.Value) };
+    }
+
+    internal IReadOnlyList<SessionInfo> ParseDetachedSessionRows(JsonElement payload)
+    {
+        if (!TryGetSessionsPayload(payload, out var rows) || rows.ValueKind != JsonValueKind.Array)
+            return Array.Empty<SessionInfo>();
+        var sessions = new List<SessionInfo>();
+        foreach (var item in rows.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+            var key = GetString(item, "key");
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var session = new SessionInfo { Key = key };
+            UpdateSessionMainStatus(session, key, item);
+            PopulateSessionFromObject(session, item, authoritativeSessionList: true);
+            sessions.Add(session);
+        }
+        return sessions;
     }
 
     // ── sessions.files.list / sessions.files.get ──
