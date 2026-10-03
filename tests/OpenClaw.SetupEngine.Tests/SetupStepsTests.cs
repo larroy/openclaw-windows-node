@@ -141,13 +141,18 @@ public class SetupStepsTests : IDisposable
     }
 
     [Fact]
-    public void PairingAuthorization_GatesInitialAndReconnectHandshakesForOperatorAndNode()
+    public async Task PairingAuthorization_UntrustedOwnerAtHandshake_BlocksAndMapsToTerminal()
     {
         var context = CreateContext(new SetupConfig
         {
             DistroName = "OpenClawGateway",
             GatewayUrl = "ws://localhost:18789"
         });
+        context.EndpointProvenanceProbe = (_, _) => Task.FromResult(
+            new GatewayEndpointProvenance(
+                GatewayEndpointProvenanceKind.UnknownListener,
+                18789,
+                Detail: "unknown owner"));
         var operatorIdentityDir = Path.Combine(_tempDir, "operator-identity");
         var nodeIdentityDir = Path.Combine(_tempDir, "node-identity");
         const string gatewayUrl = "ws://localhost:18789";
@@ -161,12 +166,23 @@ public class SetupStepsTests : IDisposable
             nodeIdentityDir);
 
         PairOperatorStep.ApplyReconnectAuthorization(operatorClient, context);
-        PairOperatorStep.ApplyReconnectAuthorization(nodeClient, context);
+        var operatorAuthorization = await operatorClient.HandshakeAuthorizationAsync!(CancellationToken.None);
 
-        Assert.NotNull(operatorClient.HandshakeAuthorizationAsync);
-        Assert.NotNull(operatorClient.ReconnectAuthorizationAsync);
-        Assert.NotNull(nodeClient.HandshakeAuthorizationAsync);
-        Assert.NotNull(nodeClient.ReconnectAuthorizationAsync);
+        Assert.False(operatorAuthorization.Allowed);
+        var operatorFailure = PairOperatorStep.ConnectionFailureResult(
+            context,
+            "Operator connection failed",
+            PairOperatorStep.ConnectionOutcome.Error);
+        Assert.Equal(StepOutcome.FailedTerminal, operatorFailure.Outcome);
+        Assert.Contains("unknown owner", operatorFailure.Message);
+
+        context.PairingEndpointTrustFailure = null;
+        PairOperatorStep.ApplyReconnectAuthorization(nodeClient, context);
+        var nodeAuthorization = await nodeClient.HandshakeAuthorizationAsync!(CancellationToken.None);
+
+        Assert.False(nodeAuthorization.Allowed);
+        Assert.Equal(StepOutcome.FailedTerminal, context.PairingEndpointTrustFailure!.Outcome);
+        Assert.Contains("unknown owner", context.PairingEndpointTrustFailure.Message);
     }
 
     [Fact]
@@ -4276,6 +4292,7 @@ public class SetupStepsTests : IDisposable
                 serviceExitCode == 0 ? "" : "service unavailable",
                 TimeSpan.Zero,
                 false),
+            var value when value.StartsWith("systemctl --user is-active") => new CommandResult(3, "inactive", "", TimeSpan.Zero, false),
             var value when value.Contains("openclaw gateway start") => Ok(),
             var value when value.Contains("curl -s") => Ok("200"),
             _ => throw new InvalidOperationException($"Unexpected command: {command}"),
@@ -4288,6 +4305,33 @@ public class SetupStepsTests : IDisposable
         Assert.Equal(expectedSuccess, result.IsSuccess);
         if (!expectedSuccess)
             Assert.Contains(expectedMessage!, result.Message);
+    }
+
+    [Theory]
+    [InlineData(0, "active", false)]
+    [InlineData(3, "inactive", true)]
+    [InlineData(3, "activating", true)]
+    public async Task StartGateway_ServiceWithoutListener_StartsOnlyWhenUnitIsNotActive(
+        int isActiveExitCode, string isActiveOutput, bool expectStartCommand)
+    {
+        var commands = new FakeCommandRunner(_ => Ok(), (_, command, _) => command switch
+        {
+            var value when value.StartsWith("ss -H") => Ok(""),
+            var value when value.StartsWith("systemctl --user is-active") =>
+                new CommandResult(isActiveExitCode, isActiveOutput, "", TimeSpan.Zero, false),
+            var value when value.Contains("openclaw gateway start") => Ok(),
+            var value when value.Contains("curl -s") => Ok("200"),
+            _ => throw new InvalidOperationException($"Unexpected command: {command}"),
+        });
+        var ctx = CreateContext(commands: commands);
+        ctx.DistroName = "test-distro";
+
+        var result = await new StartGatewayStep().ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal(
+            expectStartCommand ? 1 : 0,
+            commands.WslCalls.Count(call => call.Command.Contains("openclaw gateway start", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -5538,17 +5582,17 @@ public class SetupStepsTests : IDisposable
         ctx.Config.Gateway.ReloadMode = "hybrid";
         ctx.OperatorDeviceId = PairingSocketDeviceId;
         ctx.CurrentDeviceApprovalBaseline = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(
-            ctx, ApprovalRequestKind.Device, CancellationToken.None);
+            ctx, new CliPairingRequests(ctx), ApprovalRequestKind.Device, CancellationToken.None);
         ctx.CurrentNodeApprovalBaseline = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(
-            ctx, ApprovalRequestKind.Node, CancellationToken.None);
+            ctx, new CliPairingRequests(ctx), ApprovalRequestKind.Node, CancellationToken.None);
 
         Assert.True((await new InstallGatewayServiceStep().ExecuteAsync(ctx, CancellationToken.None)).IsSuccess);
         await new InstallGatewayServiceStep().RollbackAsync(ctx, CancellationToken.None);
         Assert.True((await new MintBootstrapTokenStep().ExecuteAsync(ctx, CancellationToken.None)).IsSuccess, "mint");
-        Assert.True((await PairOperatorStep.AutoApprovePairing(ctx, requestId: null, CancellationToken.None)).IsSuccess, "operator approve");
-        Assert.True((await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None)).IsSuccess, "node approve");
+        Assert.True((await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None)).IsSuccess, "operator approve");
+        Assert.True((await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None)).IsSuccess, "node approve");
         Assert.True((await StartGatewayStep.RestartAndWaitForHealthAsync(ctx, CancellationToken.None)).IsSuccess, "restart");
-        Assert.True((await VerifyEndToEndStep.DrainPendingDeviceApprovalsAsync(ctx, CancellationToken.None)).IsSuccess, "drain");
+        Assert.True((await VerifyEndToEndStep.DrainPendingDeviceApprovalsAsync(ctx, new CliPairingRequests(ctx), CancellationToken.None)).IsSuccess, "drain");
         Assert.True((await new ConfigureGatewayStep().ExecuteAsync(ctx, CancellationToken.None)).IsSuccess, "configure");
         TrustManagedEndpoint(ctx);
         Assert.True((await new SetupWizardRunner(ctx).SuspendReloadModeAsync()).IsSuccess, "suspend reload");
@@ -5604,7 +5648,7 @@ public class SetupStepsTests : IDisposable
         var requestBaseline = PendingRequestBaseline.SuccessResult([staleRequestId]);
         ctx.CurrentDeviceApprovalBaseline = requestBaseline;
 
-        var result = await PairOperatorStep.AutoApprovePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.True(result.IsSuccess, result.Message);
         Assert.Contains(socketRequestId, result.Message);
@@ -5633,6 +5677,7 @@ public class SetupStepsTests : IDisposable
 
         var result = await PairOperatorStep.AutoApprovePairing(
             ctx,
+            new CliPairingRequests(ctx),
             requestId: null,
             CancellationToken.None);
 
@@ -5708,7 +5753,7 @@ public class SetupStepsTests : IDisposable
         ctx.SetupDeviceApprovalBaseline = PendingRequestBaseline.SuccessResult([staleSocketRequestId]);
         ctx.SetupNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([staleSocketNodeRequestId]);
 
-        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, CancellationToken.None);
+        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, new CliPairingRequests(ctx), CancellationToken.None);
 
         Assert.True(result.IsSuccess, result.Message);
         Assert.DoesNotContain(
@@ -5741,7 +5786,7 @@ public class SetupStepsTests : IDisposable
         ctx.SetupDeviceApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
         ctx.SetupNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, CancellationToken.None);
+        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, new CliPairingRequests(ctx), CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("Could not list pending device approvals (exit 1)", result.Message);
@@ -5768,10 +5813,70 @@ public class SetupStepsTests : IDisposable
         ctx.SetupDeviceApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
         ctx.SetupNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, CancellationToken.None);
+        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, new CliPairingRequests(ctx), CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("Could not list pending node approvals (exit 1)", result.Message);
+    }
+
+    [Fact]
+    public async Task SetupOperatorPairingSession_DrainApprovesOnlyNewNodeRequestOverRpc()
+    {
+        var commands = new FakeCommandRunner(
+            _ => Fail("unexpected RunAsync"),
+            (_, command, _) => Fail($"unexpected wsl command: {command}"));
+        var ctx = CreateNodePairingContext(commands);
+        ctx.SetupDeviceApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
+        ctx.SetupNodeApprovalBaseline = PendingRequestBaseline.SuccessResult(["stale-node-req"]);
+        var calls = new List<(string Method, object? Parameters)>();
+        var nodeLists = 0;
+        await using var session = new SetupOperatorPairingSession(
+            (method, parameters, _, _) =>
+            {
+                calls.Add((method, parameters));
+                var payload = method switch
+                {
+                    "device.pair.list" => """{"pending":[]}""",
+                    "node.pair.list" when ++nodeLists == 1 => $$"""
+                        {"pending":[
+                          {"requestId":"stale-node-req","nodeId":"{{PairingSocketDeviceId}}","role":"node"},
+                          {"requestId":"new-node-req","nodeId":"{{PairingSocketDeviceId}}","role":"node"}
+                        ]}
+                        """,
+                    "node.pair.list" => """{"pending":[]}""",
+                    "node.pair.approve" => "{}",
+                    _ => throw new InvalidOperationException($"unexpected rpc {method}"),
+                };
+                return Task.FromResult(JsonDocument.Parse(payload).RootElement.Clone());
+            },
+            () => ValueTask.CompletedTask);
+
+        var result = await VerifyEndToEndStep.DrainPendingApprovalsAsync(ctx, session, CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal(
+            ["device.pair.list", "node.pair.list", "node.pair.approve", "node.pair.list"],
+            calls.Select(call => call.Method));
+        var approveParameters = JsonSerializer.SerializeToElement(calls[2].Parameters);
+        Assert.Equal("new-node-req", approveParameters.GetProperty("requestId").GetString());
+        Assert.Empty(commands.WslCalls);
+    }
+
+    [Fact]
+    public async Task SetupOperatorPairingSession_GatewayRejection_FailsWithGatewayMessage()
+    {
+        var commands = NodePairingCommands("""{"pending":[]}""");
+        var ctx = CreateNodePairingContext(commands);
+        await using var session = new SetupOperatorPairingSession(
+            (method, _, _, _) => throw new InvalidOperationException(
+                method == "device.pair.approve" ? "unknown requestId" : $"unexpected rpc {method}"),
+            () => ValueTask.CompletedTask);
+
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, session, "socket-request", CancellationToken.None);
+
+        Assert.Equal(StepOutcome.Failed, result.Outcome);
+        Assert.Contains("Node approval failed (gateway rpc): unknown requestId", result.Message);
+        Assert.Empty(commands.WslCalls);
     }
 
     private static void AssertApprovedRequest(FakeCommandRunner commands, string commandText, string requestId)
@@ -5789,7 +5894,7 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(DevicePairPluginNotFoundOutput);
 
-        var result = await PairOperatorStep.AutoApprovePairing(ctx, "device-req-1", CancellationToken.None);
+        var result = await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), "device-req-1", CancellationToken.None);
 
         Assert.Equal(StepOutcome.FailedTerminal, result.Outcome);
         Assert.Equal(ApprovalRequestHelper.PluginNotFoundMessage, result.Message);
@@ -5800,7 +5905,7 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(OtherPluginNotFoundOutput);
 
-        var result = await PairOperatorStep.AutoApprovePairing(ctx, "device-req-1", CancellationToken.None);
+        var result = await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), "device-req-1", CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("Device approval failed", result.Message);
@@ -5818,7 +5923,7 @@ public class SetupStepsTests : IDisposable
         ctx.NodeDeviceId = foreignDeviceId[..16];
         ctx.CurrentNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("No new pending approval request matched", result.Message);
@@ -5843,7 +5948,7 @@ public class SetupStepsTests : IDisposable
         ctx.NodeDeviceId = "bbbbbbbbbbbbbbbb";
         ctx.CurrentNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.True(result.IsSuccess, result.Message);
         Assert.Equal(2, commands.WslCalls.Count);
@@ -5865,7 +5970,7 @@ public class SetupStepsTests : IDisposable
         ctx.NodeDeviceId = PairingSocketDeviceId[..16];
         ctx.CurrentNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("device ID is missing", result.Message);
@@ -5884,7 +5989,7 @@ public class SetupStepsTests : IDisposable
         var ctx = CreateNodePairingContext(commands);
         ctx.CurrentNodeApprovalBaseline = PendingRequestBaseline.SuccessResult([]);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains(expectedError, result.Message);
@@ -5898,7 +6003,7 @@ public class SetupStepsTests : IDisposable
         var ctx = CreateNodePairingContext(commands);
         ctx.OperatorDeviceId = null;
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, "socket-request", CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), "socket-request", CancellationToken.None);
 
         Assert.True(result.IsSuccess, result.Message);
         Assert.Single(commands.WslCalls);
@@ -5911,7 +6016,7 @@ public class SetupStepsTests : IDisposable
         var commands = NodePairingCommands("""{"pending":[]}""");
         var ctx = CreateNodePairingContext(commands);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, "unsafe;request", CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), "unsafe;request", CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("unsafe characters", result.Message);
@@ -5941,12 +6046,12 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(DevicePairPluginNotFoundOutput);
         var requestBaseline = await ApprovalRequestHelper.CapturePendingRequestBaselineAsync(
-            ctx,
+            new CliPairingRequests(ctx),
             ApprovalRequestKind.Node,
             CancellationToken.None);
         ctx.CurrentNodeApprovalBaseline = requestBaseline;
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.Equal(StepOutcome.FailedTerminal, result.Outcome);
         Assert.Equal(ApprovalRequestHelper.PluginNotFoundMessage, result.Message);
@@ -5957,12 +6062,12 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(OtherPluginNotFoundOutput);
         var requestBaseline = await ApprovalRequestHelper.CapturePendingRequestBaselineAsync(
-            ctx,
+            new CliPairingRequests(ctx),
             ApprovalRequestKind.Node,
             CancellationToken.None);
         ctx.CurrentNodeApprovalBaseline = requestBaseline;
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("Could not capture pending nodes", result.Message);
@@ -5984,7 +6089,7 @@ public class SetupStepsTests : IDisposable
         var ctx = CreateNodePairingContext(commands);
 
         var baseline = await ApprovalRequestHelper.CapturePendingRequestBaselineAsync(
-            ctx,
+            new CliPairingRequests(ctx),
             ApprovalRequestKind.Node,
             CancellationToken.None);
 
@@ -6001,7 +6106,7 @@ public class SetupStepsTests : IDisposable
         var ctx = CreateNodePairingContext(commands);
 
         var baseline = await ApprovalRequestHelper.CapturePendingRequestBaselineAsync(
-            ctx,
+            new CliPairingRequests(ctx),
             ApprovalRequestKind.Node,
             CancellationToken.None);
 
@@ -6045,26 +6150,26 @@ public class SetupStepsTests : IDisposable
                     : Fail($"unexpected wsl command: {command}");
             });
         var ctx = CreateNodePairingContext(commands);
-        var initial = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, kind, CancellationToken.None);
+        var initial = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, new CliPairingRequests(ctx), kind, CancellationToken.None);
         if (kind == ApprovalRequestKind.Device)
             ctx.CurrentDeviceApprovalBaseline = initial;
         else
             ctx.CurrentNodeApprovalBaseline = initial;
 
         var firstApproval = kind == ApprovalRequestKind.Device
-            ? await PairOperatorStep.AutoApprovePairing(ctx, requestId: null, CancellationToken.None)
-            : await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+            ? await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None)
+            : await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
         Assert.False(firstApproval.IsSuccess);
 
-        var retry = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, kind, CancellationToken.None);
+        var retry = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, new CliPairingRequests(ctx), kind, CancellationToken.None);
         Assert.Same(initial, retry);
         if (kind == ApprovalRequestKind.Device)
             ctx.CurrentDeviceApprovalBaseline = retry;
         else
             ctx.CurrentNodeApprovalBaseline = retry;
         var retryApproval = kind == ApprovalRequestKind.Device
-            ? await PairOperatorStep.AutoApprovePairing(ctx, requestId: null, CancellationToken.None)
-            : await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+            ? await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None)
+            : await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.True(retryApproval.IsSuccess, retryApproval.Message);
         Assert.Equal(3, listCalls);
@@ -6116,15 +6221,15 @@ public class SetupStepsTests : IDisposable
             });
         var ctx = CreateNodePairingContext(commands);
 
-        var initial = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, kind, CancellationToken.None);
-        var retry = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, kind, CancellationToken.None);
+        var initial = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, new CliPairingRequests(ctx), kind, CancellationToken.None);
+        var retry = await ApprovalRequestHelper.CaptureSetupBaselineOnceAsync(ctx, new CliPairingRequests(ctx), kind, CancellationToken.None);
         if (kind == ApprovalRequestKind.Device)
             ctx.CurrentDeviceApprovalBaseline = retry;
         else
             ctx.CurrentNodeApprovalBaseline = retry;
         var retryApproval = kind == ApprovalRequestKind.Device
-            ? await PairOperatorStep.AutoApprovePairing(ctx, requestId: null, CancellationToken.None)
-            : await PairNodeStep.AutoApproveNodePairing(ctx, requestId: null, CancellationToken.None);
+            ? await PairOperatorStep.AutoApprovePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None)
+            : await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), requestId: null, CancellationToken.None);
 
         Assert.False(initial.Success);
         Assert.True(retry.Success, retry.Error);
@@ -6148,7 +6253,7 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(DevicePairPluginNotFoundOutput);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, "node-req-1", CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), "node-req-1", CancellationToken.None);
 
         Assert.Equal(StepOutcome.FailedTerminal, result.Outcome);
         Assert.Equal(ApprovalRequestHelper.PluginNotFoundMessage, result.Message);
@@ -6159,7 +6264,7 @@ public class SetupStepsTests : IDisposable
     {
         var ctx = CreatePairingContext(OtherPluginNotFoundOutput);
 
-        var result = await PairNodeStep.AutoApproveNodePairing(ctx, "node-req-1", CancellationToken.None);
+        var result = await PairNodeStep.AutoApproveNodePairing(ctx, new CliPairingRequests(ctx), "node-req-1", CancellationToken.None);
 
         Assert.Equal(StepOutcome.Failed, result.Outcome);
         Assert.Contains("Node approval failed", result.Message);
