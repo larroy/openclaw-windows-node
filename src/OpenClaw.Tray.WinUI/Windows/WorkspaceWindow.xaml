@@ -143,6 +143,42 @@
                     </Grid>
                 </NavigationViewItemHeader>
                 <NavigationViewItemHeader x:Name="SessionsEmpty" FontWeight="Normal"/>
+                <NavigationViewItemHeader x:Name="ArchivedHeader" IsEnabled="True" Visibility="Collapsed">
+                    <NavigationViewItemHeader.Resources>
+                        <Thickness x:Key="NavigationViewItemInnerHeaderMargin">16,0,4,0</Thickness>
+                    </NavigationViewItemHeader.Resources>
+                    <NavigationViewItemHeader.Template>
+                        <ControlTemplate TargetType="NavigationViewItemHeader">
+                            <Grid>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="PaneStates">
+                                        <VisualState x:Name="HeaderTextVisible"/>
+                                        <VisualState x:Name="HeaderTextCollapsed">
+                                            <VisualState.Setters>
+                                                <Setter Target="HeaderContent.Visibility" Value="Collapsed"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="HeaderContent" Content="{TemplateBinding Content}"
+                                                  Height="40" HorizontalContentAlignment="Stretch"
+                                                  Margin="{ThemeResource NavigationViewItemInnerHeaderMargin}"/>
+                            </Grid>
+                        </ControlTemplate>
+                    </NavigationViewItemHeader.Template>
+                    <Button x:Name="ArchivedToggle" Click="OnToggleArchived" Style="{StaticResource SubtleButtonStyle}"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="0,0,12,0"
+                            Height="{ThemeResource NavigationViewItemOnLeftMinHeight}"
+                            CornerRadius="{ThemeResource ControlCornerRadius}" AutomationProperties.AutomationId="WorkspaceArchivedToggle">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ArchivedLabel" VerticalAlignment="Center"
+                                       Style="{StaticResource NavigationViewItemHeaderTextStyle}"/>
+                            <FontIcon x:Name="ArchivedChevron" Glyph="&#xE76C;" FontSize="12"/>
+                        </Grid>
+                    </Button>
+                </NavigationViewItemHeader>
+                <NavigationViewItemHeader x:Name="ArchivedEmpty" FontWeight="Normal" Visibility="Collapsed"/>
             </NavigationView.MenuItems>
             <NavigationView.PaneFooter>
                 <Grid x:Name="ExpandedFooter" ColumnSpacing="4" Margin="4,8,4,8">

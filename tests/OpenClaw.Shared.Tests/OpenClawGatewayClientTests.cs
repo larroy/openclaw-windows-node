@@ -3506,6 +3506,48 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
+    public void ParseSessions_ReadsPinnedUnreadArchivedAndResetsOnOmission()
+    {
+        var helper = new GatewayClientTestHelper();
+        using var client = helper.Client;
+        helper.ParseSessionsPayload(
+            """[{"key":"agent:main:main","pinned":true,"pinnedAt":1700000000000,"unread":true,"markedUnreadAt":1700000000001,"archived":false}]""");
+
+        var session = Assert.Single(helper.GetSessionList());
+        Assert.True(session.Pinned);
+        Assert.Equal(1700000000000L, session.PinnedAt);
+        Assert.True(session.Unread);
+        Assert.Equal(1700000000001L, session.MarkedUnreadAt);
+        Assert.False(session.Archived);
+
+        helper.ParseSessionsPayload("""[{"key":"agent:main:main","status":"idle"}]""");
+
+        var reset = Assert.Single(helper.GetSessionList());
+        Assert.False(reset.Pinned);
+        Assert.Null(reset.PinnedAt);
+        Assert.False(reset.Unread);
+        Assert.Null(reset.MarkedUnreadAt);
+        Assert.False(reset.Archived);
+    }
+
+    [Fact]
+    public void ParseDetachedSessionRows_ReturnsArchivedRowsWithoutTouchingTrackedSessions()
+    {
+        var helper = new GatewayClientTestHelper();
+        using var client = helper.Client;
+        helper.ParseSessionsPayload("""[{"key":"agent:main:active","status":"idle"}]""");
+
+        var rows = helper.Client.ParseDetachedSessionRows(
+            System.Text.Json.JsonDocument.Parse("""{"sessions":[{"key":"agent:main:old","archived":true}]}""").RootElement);
+
+        var archived = Assert.Single(rows);
+        Assert.Equal("agent:main:old", archived.Key);
+        Assert.True(archived.Archived);
+        var tracked = Assert.Single(helper.GetSessionList());
+        Assert.Equal("agent:main:active", tracked.Key);
+    }
+
+    [Fact]
     public void TrackedSessionActivity_SparseUpdatePreservesThinkingOverride()
     {
         var helper = new GatewayClientTestHelper();

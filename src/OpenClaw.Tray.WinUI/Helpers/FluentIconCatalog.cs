@@ -115,6 +115,21 @@ static class FluentIconCatalog
     public const string Workspace = "\uE8DA";      // OpenLocal (alias of Folder)
     public const string Cron = "\uE787";           // Calendar — Cron / scheduled jobs (matches HubWindow search mapping)
 
+    // ── Workspace session menu ──────────────────────────────────────
+    // Sidebar session context menu (Pin/Unpin, Rename, Mark unread,
+    // Archive, Fork, Copy, Reset, Compact, Export, Delete).
+    public const string Pin = "\uE718";           // Pin
+    public const string Unpin = "\uE77A";         // Unpin
+    public const string Rename = "\uE8AC";       // Rename
+    public const string MarkUnread = "\uE715";    // Mail — mark as unread
+    public const string MarkRead = "\uE8C3";      // Read — mark as read
+    public const string Archive = "\uE7B8";       // Package
+    public const string Unarchive = "\uE777";     // UpdateRestore
+    public const string Fork = "\uE8AB";          // Switch
+    public const string Compact = "\uE74C";       // Reduce — matches SessionsPage compact glyph
+    public const string Export = "\uEDE1";        // Export — matches SessionsPage export glyph
+    public const string Delete = "\uE74D";        // Delete — matches SessionsPage delete glyph
+
     public static FontFamily SymbolThemeFontFamily =>
         (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"];
 
