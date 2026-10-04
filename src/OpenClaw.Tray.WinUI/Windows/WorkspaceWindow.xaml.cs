@@ -37,6 +37,10 @@ public sealed partial class WorkspaceWindow : WindowEx
     private readonly Dictionary<string, NavigationViewItem> _archivedSessionItems = new(StringComparer.Ordinal);
     private bool _updating;
     private bool _creatingSession;
+    // Session switches commit sidebar/navigation state synchronously; the chat surface is
+    // applied on one later low-priority dispatcher turn so the click paints first, and rapid
+    // clicks coalesce onto the latest ChatPage.QueueSession value.
+    private bool _chatApplyQueued;
     private bool _showingAgentCreation;
     private IOperatorGatewayClient? _refreshingClient;
     private string? _agentId;
@@ -192,11 +196,10 @@ public sealed partial class WorkspaceWindow : WindowEx
         }
         if (Destination.Page == WorkspacePageId.Home && ContentHost.Children.Contains(_chat))
         {
-            _chat.Initialize(this);
+            QueueChatApply();
             UpdateNavigationSelection();
             BackButton.IsEnabled = _navigation.CanGoBack;
             ForwardButton.IsEnabled = _navigation.CanGoForward;
-            SignalContentReady(_chat);
             return;
         }
         ContentHost.Children.Clear();
@@ -217,6 +220,23 @@ public sealed partial class WorkspaceWindow : WindowEx
         ForwardButton.IsEnabled = _navigation.CanGoForward;
         if (ContentHost.Children.FirstOrDefault() is FrameworkElement content)
             SignalContentReady(content);
+    }
+
+    private void QueueChatApply()
+    {
+        if (_chatApplyQueued) return;
+        // TryEnqueue fails only while the dispatcher shuts down; the window is closing then.
+        _chatApplyQueued = DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ApplyQueuedChat);
+    }
+
+    private void ApplyQueuedChat()
+    {
+        _chatApplyQueued = false;
+        if (IsClosed || Destination.Page != WorkspacePageId.Home || !ContentHost.Children.Contains(_chat))
+            return;
+        _chat.Initialize(this);
+        SignalContentReady(_chat);
     }
 
     private void UpdateNavigationSelection()

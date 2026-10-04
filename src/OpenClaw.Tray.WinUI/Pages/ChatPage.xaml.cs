@@ -83,6 +83,13 @@ public sealed partial class ChatPage : Page
         ct.ThrowIfCancellationRequested();
     }
     private readonly SemaphoreSlim _speakerMuteGate = new(1, 1);
+    // Bumped by every surface apply and by unload; an in-flight WebView credential
+    // resolution applies only if its generation is still current.
+    private int _surfaceGeneration;
+    // Serializes credential resolution across every ChatPage (Hub and Workspace each own one):
+    // concurrent native-runtime Inspect calls deny each other (NativeGatewayRuntime.Inspect
+    // uses _gate.Wait(0)).
+    private static readonly SemaphoreSlim s_chatCredentialGate = new(1, 1);
     private int _voiceSettingsDialogOpen;
     private bool _navigationStarted;
     private CancellationTokenSource? _navigationCts;
@@ -101,6 +108,7 @@ public sealed partial class ChatPage : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _surfaceGeneration++;
         _pageActive = false;
         _pendingVoice.Cancel();
         UpdateNativeChatSurfaceActive();
@@ -167,18 +175,6 @@ public sealed partial class ChatPage : Page
                 _hub.PendingAutoStartVoice = false;
         }
 
-        // Compute a "open in browser" URL once so the toolbar button works
-        // even when the gateway isn't fully reachable yet.
-        string? url = null;
-        if (CurrentApp.Settings is not null)
-        {
-            url = TryComputeChatUrl(CurrentApp.Settings);
-            if (!string.IsNullOrEmpty(url))
-            {
-                _chatUrl = url;
-            }
-        }
-
         // Re-mount on settings change so toggling "Use standard Gateway Chat
         // interface" swaps the surface live.
         CurrentApp.SettingsChanged -= OnSettingsSaved;
@@ -196,7 +192,7 @@ public sealed partial class ChatPage : Page
         OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed -= OnDebugOverrideChanged;
         OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed += OnDebugOverrideChanged;
 
-        ApplyChatSurface(url);
+        ApplyChatSurface();
     }
 
     internal void CloseSurface()
@@ -225,7 +221,7 @@ public sealed partial class ChatPage : Page
             return;
         }
 
-        _ = dispatcher.TryEnqueue(() => ApplyChatSurface());
+        _ = dispatcher.TryEnqueue(ApplyChatSurface);
     }
 
     internal void SelectSession(string sessionKey)
@@ -245,14 +241,10 @@ public sealed partial class ChatPage : Page
     private void OnWorkspaceOpenConnection(object sender, RoutedEventArgs e) =>
         ((IAppCommands)CurrentApp).Navigate("connection");
 
-    /// <param name="computedChatUrl">
-    /// URL already resolved by the caller. Credential resolution is expensive, so
-    /// <see cref="Initialize(Window?)"/> passes its result instead of resolving twice;
-    /// settings and provider changes pass nothing and recompute.
-    /// </param>
-    private void ApplyChatSurface(string? computedChatUrl = null)
+    private void ApplyChatSurface()
     {
-        if (CurrentApp.Settings is null) return;
+        if (CurrentApp.Settings is not { } settings) return;
+        var generation = ++_surfaceGeneration;
         if (_nativeSetupBinding.Request is not null)
         {
             try
@@ -273,38 +265,29 @@ public sealed partial class ChatPage : Page
             return;
         }
 
-        var computedUrl = computedChatUrl ?? TryComputeChatUrl(CurrentApp.Settings);
-        var decision = ChatSurfaceResolver.Resolve(
-            ChatSurfaceTarget.HubChat,
-            CurrentApp.Settings.UseLegacyWebChat,
-            _chatUrl,
-            computedUrl);
-
-        _chatUrl = decision.ChatUrl;
-
-        if (decision.UseLegacyWebChat)
-            ShowWebViewSurface(forceNavigate: decision.ChatUrlChanged);
+        if (ChatSurfaceResolver.UseLegacyWebChat(ChatSurfaceTarget.HubChat, settings.UseLegacyWebChat))
+            _ = ApplyWebViewSurfaceAsync(settings, generation);
         else
             ShowReactorSurface();
     }
 
-    private static string? TryComputeChatUrl(SettingsManager settings)
-    {
-        return InteractiveGatewayCredentialResolver.TryResolve(
-            (App.Current as App)?.Registry,
+    private static InteractiveGatewayCredential? ResolveChatCredential(
+        GatewayRegistry? registry,
+        InteractiveGatewayEndpointAuthorizer? authorizer,
+        string? gatewayUrl,
+        string? legacyToken,
+        string? legacyBootstrapToken) =>
+        InteractiveGatewayCredentialResolver.TryResolve(
+            registry,
             SettingsManager.SettingsDirectoryPath,
             DeviceIdentityFileReader.Instance,
-            settings.GetEffectiveGatewayUrl(),
-            settings.LegacyToken,
-            settings.LegacyBootstrapToken,
-            (record, candidate) =>
-                (App.Current as App)?.InteractiveEndpointAuthorizer
-                    ?.IsCredentialAllowed(record, candidate) == true,
-            out var credential) &&
-            credential is { IsBootstrapToken: false }
-            ? ChatSurfaceResolver.BuildChatUrl(credential.GatewayUrl, credential.Token)
+            gatewayUrl,
+            legacyToken,
+            legacyBootstrapToken,
+            (record, candidate) => authorizer?.IsCredentialAllowed(record, candidate) == true,
+            out var credential)
+            ? credential
             : null;
-    }
 
     private void ShowReactorSurface()
     {
@@ -643,7 +626,40 @@ public sealed partial class ChatPage : Page
         }
     }
 
-    private void ShowWebViewSurface(bool forceNavigate = false)
+    private async Task ApplyWebViewSurfaceAsync(SettingsManager settings, int generation)
+    {
+        InteractiveGatewayCredential? credential = null;
+        await s_chatCredentialGate.WaitAsync();
+        try
+        {
+            // A newer apply (session switch, settings or provider change) or an unload superseded
+            // this request; skip the wsl.exe-backed provenance check entirely.
+            if (generation != _surfaceGeneration) return;
+            // Capture on the UI thread (continuation resumes here); resolve off it.
+            var registry = CurrentApp.Registry;
+            var authorizer = CurrentApp.InteractiveEndpointAuthorizer;
+            var gatewayUrl = settings.GetEffectiveGatewayUrl();
+            var legacyToken = settings.LegacyToken;
+            var legacyBootstrapToken = settings.LegacyBootstrapToken;
+            credential = await Task.Run(() => ResolveChatCredential(
+                registry, authorizer, gatewayUrl, legacyToken, legacyBootstrapToken));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[ChatPage] Chat credential resolution failed ({ex.GetType().Name}).");
+        }
+        finally
+        {
+            s_chatCredentialGate.Release();
+        }
+        if (generation != _surfaceGeneration) return;
+        _chatUrl = credential is { IsBootstrapToken: false }
+            ? ChatSurfaceResolver.BuildChatUrl(credential.GatewayUrl, credential.Token)
+            : null;
+        ShowWebViewSurface(credential);
+    }
+
+    private void ShowWebViewSurface(InteractiveGatewayCredential? credential)
     {
         _pendingVoice.Cancel();
         // Consume pending session key for WebView mode.
@@ -675,23 +691,20 @@ public sealed partial class ChatPage : Page
 
         if (_webViewInitialized)
         {
-            // Already initialized — show it. The caller's `forceNavigate`
-            // flag is informational; we always re-navigate so a settings
-            // change (token / gateway URL) reaches the WebView.
+            // Already initialized: always re-navigate so a settings change
+            // (token / gateway URL) reaches the WebView.
             if (!NavigateWebViewToCurrentChatUrl())
                 ShowMissingChatCredentialError();
-            _ = forceNavigate; // explicit: parameter is currently advisory
             return;
         }
 
-        if (string.IsNullOrEmpty(_chatUrl))
+        if (credential is null)
         {
             ShowMissingChatCredentialError();
             return;
         }
 
-        if (CurrentApp.Settings is null) return;
-        _ = InitializeWebViewAsync(CurrentApp.Settings);
+        _ = InitializeWebViewAsync(credential);
     }
 
     private bool NavigateWebViewToCurrentChatUrl()
@@ -757,29 +770,10 @@ public sealed partial class ChatPage : Page
             app.SetHubNativeChatSurfaceActive(_pageActive && !_webViewMode && _reactorHost is not null);
     }
 
-    private async Task InitializeWebViewAsync(SettingsManager settings)
+    private async Task InitializeWebViewAsync(InteractiveGatewayCredential credential)
     {
         try
         {
-            if (!InteractiveGatewayCredentialResolver.TryResolve(
-                CurrentApp.Registry,
-                SettingsManager.SettingsDirectoryPath,
-                DeviceIdentityFileReader.Instance,
-                settings.GetEffectiveGatewayUrl(),
-                settings.LegacyToken,
-                settings.LegacyBootstrapToken,
-                (record, candidate) =>
-                    CurrentApp.InteractiveEndpointAuthorizer
-                        ?.IsCredentialAllowed(record, candidate) == true,
-                out var credential) ||
-                credential == null)
-            {
-                PlaceholderPanel.Visibility = Visibility.Collapsed;
-                ErrorPanel.Visibility = Visibility.Visible;
-                ErrorText.Text = LocalizationHelper.GetString("ChatPage_OpenConnectionSettings");
-                return;
-            }
-
             if (credential.IsBootstrapToken)
             {
                 PlaceholderPanel.Visibility = Visibility.Collapsed;
@@ -795,7 +789,6 @@ public sealed partial class ChatPage : Page
                 ErrorText.Text = errorMessage;
                 return;
             }
-            _chatUrl = chatUrl;
             _chatUrl = chatUrl;
 
             PlaceholderPanel.Visibility = Visibility.Collapsed;
