@@ -169,9 +169,10 @@ public sealed partial class ChatPage : Page
 
         // Compute a "open in browser" URL once so the toolbar button works
         // even when the gateway isn't fully reachable yet.
+        string? url = null;
         if (CurrentApp.Settings is not null)
         {
-            var url = TryComputeChatUrl(CurrentApp.Settings);
+            url = TryComputeChatUrl(CurrentApp.Settings);
             if (!string.IsNullOrEmpty(url))
             {
                 _chatUrl = url;
@@ -195,7 +196,7 @@ public sealed partial class ChatPage : Page
         OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed -= OnDebugOverrideChanged;
         OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed += OnDebugOverrideChanged;
 
-        ApplyChatSurface();
+        ApplyChatSurface(url);
     }
 
     internal void CloseSurface()
@@ -224,7 +225,7 @@ public sealed partial class ChatPage : Page
             return;
         }
 
-        _ = dispatcher.TryEnqueue(ApplyChatSurface);
+        _ = dispatcher.TryEnqueue(() => ApplyChatSurface());
     }
 
     internal void SelectSession(string sessionKey)
@@ -244,7 +245,12 @@ public sealed partial class ChatPage : Page
     private void OnWorkspaceOpenConnection(object sender, RoutedEventArgs e) =>
         ((IAppCommands)CurrentApp).Navigate("connection");
 
-    private void ApplyChatSurface()
+    /// <param name="computedChatUrl">
+    /// URL already resolved by the caller. Credential resolution is expensive, so
+    /// <see cref="Initialize(Window?)"/> passes its result instead of resolving twice;
+    /// settings and provider changes pass nothing and recompute.
+    /// </param>
+    private void ApplyChatSurface(string? computedChatUrl = null)
     {
         if (CurrentApp.Settings is null) return;
         if (_nativeSetupBinding.Request is not null)
@@ -267,11 +273,12 @@ public sealed partial class ChatPage : Page
             return;
         }
 
+        var computedUrl = computedChatUrl ?? TryComputeChatUrl(CurrentApp.Settings);
         var decision = ChatSurfaceResolver.Resolve(
             ChatSurfaceTarget.HubChat,
             CurrentApp.Settings.UseLegacyWebChat,
             _chatUrl,
-            TryComputeChatUrl(CurrentApp.Settings));
+            computedUrl);
 
         _chatUrl = decision.ChatUrl;
 

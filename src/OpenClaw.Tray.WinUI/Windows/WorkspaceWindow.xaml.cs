@@ -32,6 +32,9 @@ public sealed partial class WorkspaceWindow : WindowEx
     private readonly Flyout _gatewayStatusFlyout = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft };
     private readonly MenuFlyoutItem _connectionStatusItem = new();
     private readonly FontIcon _connectionStatusIcon = new();
+    // Sidebar rows keyed by session key; SyncSessionItems keeps MenuItems in step with these.
+    private readonly Dictionary<string, NavigationViewItem> _sessionItems = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, NavigationViewItem> _archivedSessionItems = new(StringComparer.Ordinal);
     private bool _updating;
     private bool _creatingSession;
     private bool _showingAgentCreation;
@@ -279,26 +282,14 @@ public sealed partial class WorkspaceWindow : WindowEx
         }
         desiredItems.Add(NewAgentOption);
         // Keep the open popup and selected container alive across independent roster/session responses.
-        for (var index = 0; index < desiredItems.Count; index++)
-        {
-            var item = desiredItems[index];
-            if (index < AssistantSelector.Items.Count && ReferenceEquals(AssistantSelector.Items[index], item))
-                continue;
-            AssistantSelector.Items.Remove(item);
-            AssistantSelector.Items.Insert(index, item);
-        }
+        WorkspaceItemsSync.Arrange(AssistantSelector.Items, 0, desiredItems.Cast<object>().ToList());
         while (AssistantSelector.Items.Count > desiredItems.Count)
             AssistantSelector.Items.RemoveAt(AssistantSelector.Items.Count - 1);
         _agentId = WorkspaceProjection.SelectedAgentId(_state.AgentsList, agents, _agentId);
         RestoreAssistantSelection();
         AssistantSelector.PlaceholderText = Text(agents.Count == 0 ? "NoAgents" : "SelectAssistant");
         var sessions = WorkspaceProjection.Sessions(_state.Sessions, _agentId);
-        foreach (var item in NavView.MenuItems.OfType<NavigationViewItem>()
-            .Where(item => item.Tag is WorkspaceSession).ToArray())
-            NavView.MenuItems.Remove(item);
-        var anchor = NavView.MenuItems.IndexOf(ArchivedHeader);
-        foreach (var session in sessions)
-            NavView.MenuItems.Insert(anchor++, CreateSessionItem(session, "WorkspaceSession"));
+        SyncSessionItems(_sessionItems, sessions, "WorkspaceSession", NavView.MenuItems.IndexOf(SessionsEmpty) + 1);
         var connected = _state.Status == ConnectionStatus.Connected;
         ArchivedHeader.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
         ArchivedChevron.Glyph = _archived.IsExpanded ? FluentIconCatalog.ChevronDown : FluentIconCatalog.ChevronR;
@@ -311,8 +302,7 @@ public sealed partial class WorkspaceWindow : WindowEx
         ArchivedEmpty.Visibility = connected && _archived.IsExpanded && _archived.HasLoaded && archived.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
-        foreach (var session in archived)
-            NavView.MenuItems.Add(CreateSessionItem(session, "WorkspaceArchivedSession"));
+        SyncSessionItems(_archivedSessionItems, archived, "WorkspaceArchivedSession", NavView.MenuItems.IndexOf(ArchivedEmpty) + 1);
         SessionsEmpty.Content = Text("NoSessions");
         SessionsEmpty.Visibility = sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NewAgentOption.IsEnabled = !_showingAgentCreation;
@@ -327,7 +317,49 @@ public sealed partial class WorkspaceWindow : WindowEx
             UpdateNavigationSelection();
     }
 
+    /// <summary>
+    /// Reconciles one sidebar section in place. Rows are cached by session key so a reused
+    /// row keeps its container; destroying the selected row inside SelectionChanged forced
+    /// NavigationView to reselect and re-layout on every session switch.
+    /// </summary>
+    private void SyncSessionItems(
+        Dictionary<string, NavigationViewItem> cache, IReadOnlyList<WorkspaceSession> sessions,
+        string automationPrefix, int start)
+    {
+        var desired = new List<object>(sessions.Count);
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var session in sessions)
+        {
+            keys.Add(session.Key);
+            if (cache.TryGetValue(session.Key, out var item))
+            {
+                if (!Equals(item.Tag, session))
+                    ApplySessionItem(item, session);
+            }
+            else
+            {
+                item = CreateSessionItem(session, automationPrefix);
+                cache[session.Key] = item;
+            }
+            desired.Add(item);
+        }
+        foreach (var (key, item) in cache.Where(entry => !keys.Contains(entry.Key)).ToArray())
+        {
+            NavView.MenuItems.Remove(item);
+            cache.Remove(key);
+        }
+        WorkspaceItemsSync.Arrange(NavView.MenuItems, start, desired);
+    }
+
     private NavigationViewItem CreateSessionItem(WorkspaceSession session, string automationPrefix)
+    {
+        var item = new NavigationViewItem();
+        AutomationProperties.SetAutomationId(item, $"{automationPrefix}:{session.Key}");
+        ApplySessionItem(item, session);
+        return item;
+    }
+
+    private void ApplySessionItem(NavigationViewItem item, WorkspaceSession session)
     {
         var grid = new Grid { ColumnSpacing = 6 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
@@ -377,14 +409,10 @@ public sealed partial class WorkspaceWindow : WindowEx
             Grid.SetColumn(dot, 2);
             grid.Children.Add(dot);
         }
-        var item = new NavigationViewItem
-        {
-            Tag = session,
-            Content = grid,
-            ContextFlyout = _sessionMenu.CreateFlyout(session),
-        };
+        item.Tag = session;
+        item.Content = grid;
+        item.ContextFlyout = _sessionMenu.CreateFlyout(session);
         AutomationProperties.SetName(item, session.Title);
-        AutomationProperties.SetAutomationId(item, $"{automationPrefix}:{session.Key}");
         ToolTipService.SetToolTip(item, session.Title);
         var statusParts = new[]
         {
@@ -392,9 +420,8 @@ public sealed partial class WorkspaceWindow : WindowEx
             session.IsWorking ? Text("SessionWorking") : null,
             session.IsUnread ? Text("SessionUnread") : null,
         }.Where(part => part is not null).ToArray();
-        if (statusParts.Length > 0)
-            AutomationProperties.SetItemStatus(item, string.Join(", ", statusParts));
-        return item;
+        // Always set: a reused row must clear a stale "Unread" or "Working" status.
+        AutomationProperties.SetItemStatus(item, string.Join(", ", statusParts));
     }
 
     internal async Task RefreshAsync()

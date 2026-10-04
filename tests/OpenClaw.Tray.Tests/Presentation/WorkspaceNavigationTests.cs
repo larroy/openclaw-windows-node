@@ -815,6 +815,23 @@ public sealed class WorkspaceNavigationTests
         Assert.False(Assert.Single(archived).IsWorking);
     }
 
+    [Fact]
+    public void ItemsSync_ArrangeReordersInPlaceAndPreservesIdentity()
+    {
+        object home = new(), header = new(), empty = new(), a = new(), b = new(), c = new(),
+            archivedHeader = new(), newItem = new();
+        var items = new List<object> { home, header, empty, a, b, c, archivedHeader };
+        items.Remove(b);
+
+        WorkspaceItemsSync.Arrange(items, 3, [c, newItem, a]);
+
+        Assert.Equal(new[] { home, header, empty, c, newItem, a, archivedHeader }, items);
+        Assert.Same(c, items[3]);
+        Assert.Same(a, items[5]);
+        Assert.Same(home, items[0]);
+        Assert.Same(archivedHeader, items[6]);
+    }
+
     private static string Source(string folder, string file) =>
         Path.Combine(TestRepositoryPaths.GetRepositoryRoot(), "src", "OpenClaw.Tray.WinUI", folder, file);
 }
