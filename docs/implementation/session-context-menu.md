@@ -1,4 +1,4 @@
-# Workspace chat: sidebar session context menu — implementation summary and proof
+# Workspace chat: sidebar session context menu: implementation summary and proof
 
 Commit: `f51a70a9` on `main`, pushed to fork `larroy/openclaw-windows-node`.
 
@@ -47,7 +47,7 @@ Out of scope (unchanged, per plan): Icon & color, Move to group, Assign to, Open
 
 ## Plan deviation (contingency applied)
 
-The plan's fallback for `MenuFlyout.Target` was needed: `Target` was not populated for `NavigationViewItem.ContextFlyout`, so the shared-flyout `Opening` handler would have hidden the menu. Implemented `WorkspaceSessionMenuController.CreateFlyout(session)` — per-row `MenuFlyout` with the row captured at creation; population code is shared via `Populate(flyout, session)`. No behavior difference otherwise.
+The plan's fallback for `MenuFlyout.Target` was needed: `Target` was not populated for `NavigationViewItem.ContextFlyout`, so the shared-flyout `Opening` handler would have hidden the menu. Implemented `WorkspaceSessionMenuController.CreateFlyout(session)`: per-row `MenuFlyout` with the row captured at creation; population code is shared via `Populate(flyout, session)`. No behavior difference otherwise.
 
 ## Validation (AGENTS.md required set)
 
@@ -66,10 +66,10 @@ Focused new tests: 22 shared (patch payload allowlist, guard-only patch, label c
 Launched `.\run-app-local.ps1 -NoBuild -Isolated` connected to the developer's live gateway (`ws://127.0.0.1:18789`; isolated log confirmed `sessions.subscribe` and model resolution). Right-click on the "main" session row opened the context menu showing:
 
 - "Last active 2h ago" disabled header
-- Pin session, Rename…, Mark as unread — enabled
-- Archive session — disabled (main-session protection)
-- Fork conversation, Copy > (Copy session key / Copy session ID / Copy as Markdown), Reset session…, Compact session…, Export transcript… — enabled
-- Delete… — disabled, red destructive styling
+- Pin session, Rename…, Mark as unread: enabled
+- Archive session: disabled (main-session protection)
+- Fork conversation, Copy > (Copy session key / Copy session ID / Copy as Markdown), Reset session…, Compact session…, Export transcript…: enabled
+- Delete…: disabled, red destructive styling
 
 The sidebar rendered the new collapsible "Archived" header below the Sessions list.
 
