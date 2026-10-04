@@ -4655,6 +4655,11 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
             session.MarkedUnreadAt = parsedMarkedUnreadAt;
         else if (authoritativeSessionList)
             session.MarkedUnreadAt = null;
+        // Write-once upstream; compact/sparse rows may omit it, so omission keeps the known value.
+        if (item.TryGetProperty("createdAt", out var createdAt)
+            && createdAt.ValueKind == JsonValueKind.Number
+            && createdAt.TryGetInt64(out var parsedCreatedAt))
+            session.CreatedAt = parsedCreatedAt;
         if (item.TryGetProperty("archived", out var archived)
             && archived.ValueKind is JsonValueKind.True or JsonValueKind.False)
             session.Archived = archived.GetBoolean();

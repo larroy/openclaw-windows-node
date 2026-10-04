@@ -507,9 +507,9 @@ public sealed class WorkspaceNavigationTests
         Assert.Equal("custom", agent.Id);
         Assert.Equal("Actual agent", agent.Name);
         Assert.Equal("real-key", agent.LatestSessionKey);
-        var visible = Assert.Single(WorkspaceProjection.Sessions([session], "custom"));
+        var visible = Assert.Single(WorkspaceProjection.Sessions([session], "custom", new WorkspaceSessionOrder()));
         Assert.Equal("real-key", visible.Key);
-        Assert.Empty(WorkspaceProjection.Sessions([session], "different"));
+        Assert.Empty(WorkspaceProjection.Sessions([session], "different", new WorkspaceSessionOrder()));
     }
 
     [Fact]
@@ -621,7 +621,7 @@ public sealed class WorkspaceNavigationTests
             new SessionInfo { Key = "agent:main:main", IsMain = true },
             new SessionInfo { Key = "agent:research:main", IsMain = true },
             new SessionInfo { Key = "agent:main:subagent:worker", IsBackground = true }
-        ], "main");
+        ], "main", new WorkspaceSessionOrder());
         var session = Assert.Single(sessions);
         Assert.Equal("agent:main:main", session.Key);
         Assert.Equal("main", session.AgentId);
@@ -631,8 +631,8 @@ public sealed class WorkspaceNavigationTests
     public void Sidebar_PrefersExplicitAgentMetadataOverSessionKey()
     {
         var sessions = new[] { new SessionInfo { Key = "agent:research:main", AgentId = "main" } };
-        Assert.Equal("main", Assert.Single(WorkspaceProjection.Sessions(sessions, "main")).AgentId);
-        Assert.Empty(WorkspaceProjection.Sessions(sessions, "research"));
+        Assert.Equal("main", Assert.Single(WorkspaceProjection.Sessions(sessions, "main", new WorkspaceSessionOrder())).AgentId);
+        Assert.Empty(WorkspaceProjection.Sessions(sessions, "research", new WorkspaceSessionOrder()));
     }
 
     [Theory]
@@ -657,7 +657,7 @@ public sealed class WorkspaceNavigationTests
                 new SessionInfo { Key = "agent:main:cron:job", IsBackground = true, Status = completedStatus },
                 new SessionInfo { Key = "agent:other:conversation", Status = completedStatus }
             };
-            var visible = Assert.Single(WorkspaceProjection.Sessions(sessions, "main"));
+            var visible = Assert.Single(WorkspaceProjection.Sessions(sessions, "main", new WorkspaceSessionOrder()));
             Assert.Equal(conversation.Key, visible.Key);
             Assert.Equal("My conversation", visible.Title);
             Assert.Equal(conversation.Key, Assert.Single(WorkspaceProjection.Agents(agents.RootElement, sessions)).LatestSessionKey);
@@ -691,7 +691,7 @@ public sealed class WorkspaceNavigationTests
         };
         var agent = Assert.Single(WorkspaceProjection.Agents(json.RootElement, sessions));
         Assert.Equal("visible", agent.LatestSessionKey);
-        Assert.Equal("visible", Assert.Single(WorkspaceProjection.Sessions(sessions, "custom")).Key);
+        Assert.Equal("visible", Assert.Single(WorkspaceProjection.Sessions(sessions, "custom", new WorkspaceSessionOrder())).Key);
     }
 
     [Theory]
@@ -716,7 +716,7 @@ public sealed class WorkspaceNavigationTests
         };
         Assert.Null(background.IsBackground);
         var sessions = new[] { conversation, background };
-        Assert.Equal(conversation.Key, Assert.Single(WorkspaceProjection.Sessions(sessions, "main")).Key);
+        Assert.Equal(conversation.Key, Assert.Single(WorkspaceProjection.Sessions(sessions, "main", new WorkspaceSessionOrder())).Key);
         Assert.Equal(conversation.Key, Assert.Single(WorkspaceProjection.Agents(agents.RootElement, sessions)).LatestSessionKey);
     }
 
@@ -736,7 +736,7 @@ public sealed class WorkspaceNavigationTests
             new SessionInfo { Key = "agent:main:older", UpdatedAt = new DateTime(2026, 1, 1) },
             new SessionInfo { Key = key, Classification = classification, IsBackground = background, UpdatedAt = new DateTime(2026, 1, 2) }
         };
-        Assert.Equal(new[] { key, "agent:main:older" }, WorkspaceProjection.Sessions(sessions, "main").Select(s => s.Key));
+        Assert.Equal(new[] { key, "agent:main:older" }, WorkspaceProjection.Sessions(sessions, "main", new WorkspaceSessionOrder()).Select(s => s.Key));
         Assert.Equal(key, Assert.Single(WorkspaceProjection.Agents(agents.RootElement, sessions)).LatestSessionKey);
     }
 
@@ -752,7 +752,7 @@ public sealed class WorkspaceNavigationTests
             new SessionInfo { Key = "agent:main:archived", UpdatedAt = new DateTime(2026, 4, 1), Archived = true },
         };
 
-        var visible = WorkspaceProjection.Sessions(sessions, null);
+        var visible = WorkspaceProjection.Sessions(sessions, null, new WorkspaceSessionOrder());
 
         Assert.Equal(
             new[] { "agent:main:pinned-newer", "agent:main:pinned-older", "agent:main:unpinned-newer", "agent:main:unpinned-older" },
@@ -760,6 +760,57 @@ public sealed class WorkspaceNavigationTests
         Assert.True(visible[0].IsPinned);
         Assert.False(visible[2].IsPinned);
         Assert.DoesNotContain(visible, s => s.IsArchived);
+    }
+
+    [Fact]
+    public void Projection_ActivityDoesNotReorderSessions()
+    {
+        var order = new WorkspaceSessionOrder();
+        var a = new SessionInfo { Key = "agent:main:a", CreatedAt = 100, UpdatedAt = new DateTime(2026, 1, 1) };
+        var b = new SessionInfo { Key = "agent:main:b", CreatedAt = 200, UpdatedAt = new DateTime(2026, 1, 2) };
+
+        Assert.Equal(
+            new[] { "agent:main:b", "agent:main:a" },
+            WorkspaceProjection.Sessions([a, b], null, order).Select(s => s.Key));
+
+        var bumped = a.Clone();
+        bumped.UpdatedAt = new DateTime(2026, 3, 1);
+        Assert.Equal(
+            new[] { "agent:main:b", "agent:main:a" },
+            WorkspaceProjection.Sessions([b, bumped], null, order).Select(s => s.Key));
+
+        var c = new SessionInfo { Key = "agent:main:c", CreatedAt = 300 };
+        Assert.Equal(
+            new[] { "agent:main:c", "agent:main:b", "agent:main:a" },
+            WorkspaceProjection.Sessions([bumped, b, c], null, order).Select(s => s.Key));
+    }
+
+    [Fact]
+    public void Projection_SessionsWithoutCreatedAtFreezeFirstSeenOrder()
+    {
+        var order = new WorkspaceSessionOrder();
+        var l1 = new SessionInfo { Key = "agent:main:l1", UpdatedAt = new DateTime(2026, 1, 1) };
+        var l2 = new SessionInfo { Key = "agent:main:l2", UpdatedAt = new DateTime(2026, 1, 2) };
+
+        Assert.Equal(
+            new[] { "agent:main:l2", "agent:main:l1" },
+            WorkspaceProjection.Sessions([l1, l2], null, order).Select(s => s.Key));
+
+        var bumped = l1.Clone();
+        bumped.UpdatedAt = new DateTime(2026, 3, 1);
+        Assert.Equal(
+            new[] { "agent:main:l2", "agent:main:l1" },
+            WorkspaceProjection.Sessions([l2, bumped], null, order).Select(s => s.Key));
+
+        var l3 = new SessionInfo { Key = "agent:main:l3", UpdatedAt = new DateTime(2026, 2, 1) };
+        Assert.Equal(
+            new[] { "agent:main:l3", "agent:main:l2", "agent:main:l1" },
+            WorkspaceProjection.Sessions([bumped, l2, l3], null, order).Select(s => s.Key));
+
+        var n = new SessionInfo { Key = "agent:main:n", CreatedAt = 1 };
+        Assert.Equal(
+            new[] { "agent:main:n", "agent:main:l3", "agent:main:l2", "agent:main:l1" },
+            WorkspaceProjection.Sessions([bumped, l2, l3, n], null, order).Select(s => s.Key));
     }
 
     [Fact]
@@ -803,7 +854,7 @@ public sealed class WorkspaceNavigationTests
             new SessionInfo { Key = "agent:main:stale", HasActiveRun = false, Status = "running", UpdatedAt = new DateTime(2026, 1, 1) },
         };
 
-        var rows = WorkspaceProjection.Sessions(sessions, null).ToDictionary(row => row.Key);
+        var rows = WorkspaceProjection.Sessions(sessions, null, new WorkspaceSessionOrder()).ToDictionary(row => row.Key);
 
         Assert.True(rows["agent:main:live"].IsWorking);
         Assert.True(rows["agent:main:legacy"].IsWorking);

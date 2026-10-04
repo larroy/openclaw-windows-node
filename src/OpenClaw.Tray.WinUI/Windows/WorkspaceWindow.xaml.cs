@@ -27,6 +27,7 @@ public sealed partial class WorkspaceWindow : WindowEx
     private readonly WorkspaceArchivedSessionsSource _archived;
     private readonly WorkspaceSessionMenuController _sessionMenu;
     private readonly WorkspaceNavigationHistory _navigation = new();
+    private readonly WorkspaceSessionOrder _sessionOrder = new();
     private readonly ChatPage _chat = new();
     private readonly GatewayStatusContent _gatewayStatusContent = new();
     private readonly Flyout _gatewayStatusFlyout = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft };
@@ -308,7 +309,7 @@ public sealed partial class WorkspaceWindow : WindowEx
         _agentId = WorkspaceProjection.SelectedAgentId(_state.AgentsList, agents, _agentId);
         RestoreAssistantSelection();
         AssistantSelector.PlaceholderText = Text(agents.Count == 0 ? "NoAgents" : "SelectAssistant");
-        var sessions = WorkspaceProjection.Sessions(_state.Sessions, _agentId);
+        var sessions = WorkspaceProjection.Sessions(_state.Sessions, _agentId, _sessionOrder);
         SyncSessionItems(_sessionItems, sessions, "WorkspaceSession", NavView.MenuItems.IndexOf(SessionsEmpty) + 1);
         var connected = _state.Status == ConnectionStatus.Connected;
         ArchivedHeader.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
@@ -565,7 +566,7 @@ public sealed partial class WorkspaceWindow : WindowEx
     {
         if (Destination is not { Page: WorkspacePageId.Home, SessionKey: { } current } || current != key)
             return;
-        var next = WorkspaceProjection.Sessions(_state.Sessions, _agentId)
+        var next = WorkspaceProjection.Sessions(_state.Sessions, _agentId, _sessionOrder)
             .FirstOrDefault(session => session.Key != key);
         if (next is { } nextSession)
             SelectSession(nextSession.Key);

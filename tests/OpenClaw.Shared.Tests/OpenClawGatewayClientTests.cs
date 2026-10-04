@@ -3531,6 +3531,20 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
+    public void ParseSessions_ReadsCreatedAtAndKeepsItWhenOmitted()
+    {
+        var helper = new GatewayClientTestHelper();
+        using var client = helper.Client;
+        helper.ParseSessionsPayload("""[{"key":"agent:main:main","createdAt":1700000000000}]""");
+
+        Assert.Equal(1700000000000L, Assert.Single(helper.GetSessionList()).CreatedAt);
+
+        helper.ParseSessionsPayload("""[{"key":"agent:main:main","status":"idle"}]""");
+
+        Assert.Equal(1700000000000L, Assert.Single(helper.GetSessionList()).CreatedAt);
+    }
+
+    [Fact]
     public void ParseDetachedSessionRows_ReturnsArchivedRowsWithoutTouchingTrackedSessions()
     {
         var helper = new GatewayClientTestHelper();

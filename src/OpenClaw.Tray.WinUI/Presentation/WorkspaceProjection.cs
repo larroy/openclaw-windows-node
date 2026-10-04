@@ -27,7 +27,7 @@ internal static class WorkspaceProjection
                 var related = Visible(sessions, id);
                 return new WorkspaceAgent(
                     id, ReadString(identity, "name") ?? ReadString(agent, "name") ?? id,
-                    related.FirstOrDefault()?.Key, ReadString(identity, "emoji"),
+                    related.OrderByDescending(session => session.UpdatedAt).FirstOrDefault()?.Key, ReadString(identity, "emoji"),
                     ReadString(identity, "avatarUrl") ?? ReadString(identity, "avatar"));
             })
             .Where(agent => !string.IsNullOrWhiteSpace(agent.Id))
@@ -59,12 +59,10 @@ internal static class WorkspaceProjection
         root.TryGetProperty("selectionRequired", out var required) && required.ValueKind == JsonValueKind.True &&
         SelectedAgentId(data, agents, selectedId) is null;
 
-    public static IReadOnlyList<WorkspaceSession> Sessions(IEnumerable<SessionInfo> source, string? agentId)
+    public static IReadOnlyList<WorkspaceSession> Sessions(IEnumerable<SessionInfo> source, string? agentId, WorkspaceSessionOrder order)
     {
-        // A completed run leaves a reusable conversation, not a finished sidebar item.
-        // Pinned rows come first (most recently pinned on top); LINQ ordering is
-        // stable, so unpinned rows keep updatedAt order.
-        var sessions = Visible(source, agentId)
+        // Pinned rows first (most recently pinned on top); everything else keeps creation order (WorkspaceSessionOrder), so new input or activity never reorders the sidebar.
+        var sessions = order.Sort(Visible(source, agentId))
             .OrderByDescending(s => s.Pinned)
             .ThenByDescending(s => s.Pinned ? s.PinnedAt ?? 0 : 0)
             .ToArray();
@@ -83,13 +81,12 @@ internal static class WorkspaceProjection
     }
 
     // The active sidebar hides archived rows; the archived section must never
-    // influence the "latest session" per agent.
+    // influence the "latest session" per agent. Filtering only; ordering lives in Sessions.
     private static IEnumerable<SessionInfo> Visible(IEnumerable<SessionInfo> source, string? agentId) =>
         source
             .Where(session => !session.Archived &&
                 !SessionDisplayResolver.IsBackground(session) &&
-                (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)))
-            .OrderByDescending(session => session.UpdatedAt);
+                (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)));
 
     private static IReadOnlyList<WorkspaceSession> Project(SessionInfo[] sessions, bool archived)
     {

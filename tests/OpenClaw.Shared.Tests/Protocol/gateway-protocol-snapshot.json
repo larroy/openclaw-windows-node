@@ -71,7 +71,7 @@
         "space", "chatType", "execNode", "parentSessionKey", "spawnDepth", "origin",
         "worktree", "classification", "agentId", "accountId", "peerKind", "isBackground", "sessionId", "thinkingLevel", "verboseLevel",
         "systemSent", "abortedLastRun", "inputTokens", "outputTokens", "totalTokens",
-        "contextTokens", "updatedAt", "startedAt", "pinned", "pinnedAt", "unread", "markedUnreadAt", "archived"
+        "contextTokens", "updatedAt", "startedAt", "pinned", "pinnedAt", "unread", "markedUnreadAt", "createdAt", "archived"
       ]
     },
     {
