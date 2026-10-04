@@ -351,7 +351,20 @@ public sealed partial class WorkspaceWindow : WindowEx
         };
         Grid.SetColumn(title, session.IsPinned ? 1 : 0);
         grid.Children.Add(title);
-        if (session.IsUnread)
+        if (session.IsWorking)
+        {
+            var busy = new ProgressRing
+            {
+                IsActive = true,
+                Width = 14,
+                Height = 14,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            AutomationProperties.SetAccessibilityView(busy, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            Grid.SetColumn(busy, 2);
+            grid.Children.Add(busy);
+        }
+        else if (session.IsUnread)
         {
             var dot = new Ellipse
             {
@@ -361,6 +374,7 @@ public sealed partial class WorkspaceWindow : WindowEx
                 VerticalAlignment = VerticalAlignment.Center,
             };
             AutomationProperties.SetAccessibilityView(dot, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            Grid.SetColumn(dot, 2);
             grid.Children.Add(dot);
         }
         var item = new NavigationViewItem
@@ -375,6 +389,7 @@ public sealed partial class WorkspaceWindow : WindowEx
         var statusParts = new[]
         {
             session.IsPinned ? Text("SessionPinned") : null,
+            session.IsWorking ? Text("SessionWorking") : null,
             session.IsUnread ? Text("SessionUnread") : null,
         }.Where(part => part is not null).ToArray();
         if (statusParts.Length > 0)

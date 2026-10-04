@@ -1,12 +1,13 @@
 using System.Text.Json;
 using OpenClaw.Shared;
+using OpenClaw.Shared.Sessions;
 using OpenClawTray.Services;
 
 namespace OpenClawTray.Presentation;
 
 internal sealed record WorkspaceAgent(string Id, string Name, string? LatestSessionKey, string? Emoji = null, string? AvatarUrl = null);
 internal sealed record WorkspaceSession(string Key, string Title, string? AgentId,
-    bool IsPinned = false, bool IsUnread = false, bool IsArchived = false);
+    bool IsPinned = false, bool IsUnread = false, bool IsArchived = false, bool IsWorking = false);
 
 internal static class WorkspaceProjection
 {
@@ -95,6 +96,7 @@ internal static class WorkspaceProjection
         var titles = SessionTitleFormatter.FormatUnique(sessions);
         return sessions.Select((session, index) => new WorkspaceSession(
             session.Key, titles[index], SessionDisplayResolver.Resolve(session).AgentId,
-            session.Pinned && !archived, session.Unread && !archived, archived)).ToArray();
+            session.Pinned && !archived, session.Unread && !archived, archived,
+            SessionRunState.IsWorking(session) && !archived)).ToArray();
     }
 }

@@ -7843,6 +7843,7 @@ Uw instellingen, gateway, bestanden en modellen blijven op hun plaats.</value>
   <data name="WorkspaceShell_SessionRename_Save" xml:space="preserve"><value>Save</value></data>
   <data name="WorkspaceShell_SessionPinned" xml:space="preserve"><value>Pinned</value></data>
   <data name="WorkspaceShell_SessionUnread" xml:space="preserve"><value>Unread</value></data>
+  <data name="WorkspaceShell_SessionWorking" xml:space="preserve"><value>Working</value></data>
   <data name="WorkspaceShell_Archived" xml:space="preserve"><value>Archived</value></data>
   <data name="WorkspaceShell_ArchivedExpanded" xml:space="preserve"><value>Expanded</value></data>
   <data name="WorkspaceShell_ArchivedCollapsed" xml:space="preserve"><value>Collapsed</value></data>

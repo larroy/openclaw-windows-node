@@ -793,6 +793,28 @@ public sealed class WorkspaceNavigationTests
         Assert.False(row.IsUnread);
     }
 
+    [Fact]
+    public void Projection_WorkingStateFollowsActiveRunAndIsSuppressedForArchivedRows()
+    {
+        var sessions = new[]
+        {
+            new SessionInfo { Key = "agent:main:live", HasActiveRun = true, Status = "done", UpdatedAt = new DateTime(2026, 3, 1) },
+            new SessionInfo { Key = "agent:main:legacy", Status = "running", UpdatedAt = new DateTime(2026, 2, 1) },
+            new SessionInfo { Key = "agent:main:stale", HasActiveRun = false, Status = "running", UpdatedAt = new DateTime(2026, 1, 1) },
+        };
+
+        var rows = WorkspaceProjection.Sessions(sessions, null).ToDictionary(row => row.Key);
+
+        Assert.True(rows["agent:main:live"].IsWorking);
+        Assert.True(rows["agent:main:legacy"].IsWorking);
+        Assert.False(rows["agent:main:stale"].IsWorking);
+
+        var archived = WorkspaceProjection.ArchivedSessions(
+            [new SessionInfo { Key = "agent:main:archived", Archived = true, HasActiveRun = true }], null);
+
+        Assert.False(Assert.Single(archived).IsWorking);
+    }
+
     private static string Source(string folder, string file) =>
         Path.Combine(TestRepositoryPaths.GetRepositoryRoot(), "src", "OpenClaw.Tray.WinUI", folder, file);
 }
