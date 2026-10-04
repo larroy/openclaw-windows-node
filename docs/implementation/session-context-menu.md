@@ -38,8 +38,8 @@ Out of scope (unchanged, per plan): Icon & color, Move to group, Assign to, Open
 
 ### Tray.WinUI wiring
 
-- `RefreshSidebar` removes all `WorkspaceSession`-tagged items, re-inserts active rows before the `ArchivedHeader` anchor, then appends archived rows. Archived header hides when disconnected; chevron tracks expansion; empty/unavailable placeholders handled.
-- `CreateSessionItem(session, automationPrefix)`: pin glyph column, unread accent dot, item status (`Pinned`, `Unread`), per-row context flyout.
+- `RefreshSidebar` reconciles rows in place: `SyncSessionItems` keeps one `NavigationViewItem` per session key (active and archived caches), refreshes a reused row through `ApplySessionItem` only when its `WorkspaceSession` changed, removes stale rows, and orders rows after `SessionsEmpty` / `ArchivedEmpty` via `WorkspaceItemsSync.Arrange`. The selected container is never destroyed during `SelectionChanged`. Archived header hides when disconnected; chevron tracks expansion; empty/unavailable placeholders handled.
+- `CreateSessionItem(session, automationPrefix)` sets the stable AutomationId and delegates to `ApplySessionItem`: pin glyph column, unread accent dot or busy ring, item status (`Pinned`, `Working`, `Unread`; always reset so reused rows drop stale status), per-row context flyout.
 - `OnStateChanged`: archived refresh on `Sessions` change when expanded; `Clear()` when disconnected; refresh on reconnect when expanded.
 - `RenderDestination`: fires `AcknowledgeReadAsync` for unread sessions on navigation (list refresh does not re-trigger it, so "Mark as unread" on the open session persists until re-navigation).
 - Session creation split into `CreateAndSelectSessionAsync` shared by `NewSessionAsync` and `ForkSessionAsync`; `LeaveSession(key)` selects the next non-key session or returns to Home; `ShowInfo(message, severity)` added, `ShowError` now sets `InfoBarSeverity.Error` explicitly.
