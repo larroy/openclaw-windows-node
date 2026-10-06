@@ -37,6 +37,7 @@ public sealed partial class ChatPage : Page
     private IChatDataProvider? _mountedProvider;
     private IChatDataProvider? _accessibilityTestProvider;
     private string? _mountedThreadId;
+    private bool _sessionRemoved;
     private string? _chatUrl;
     private bool _webViewInitialized;
     private bool _webViewMode;
@@ -58,6 +59,7 @@ public sealed partial class ChatPage : Page
     {
         request.GetConnectedClient(CurrentApp.Registry, CurrentApp.ConnectionManager);
         _nativeSetupBinding.Bind(request);
+        _sessionRemoved = false;
         _pendingSessionKey = request.Completion.Target.SessionKey;
         _pendingVoice.Cancel();
     }
@@ -229,14 +231,48 @@ public sealed partial class ChatPage : Page
         if (string.IsNullOrWhiteSpace(sessionKey))
             return;
 
-        _pendingSessionKey = sessionKey;
+        QueueSession(sessionKey);
         if (_hub is not null)
             _hub.PendingChatSessionKey = sessionKey;
         CurrentApp.PendingChatSessionKey = sessionKey;
         ApplyChatSurface();
     }
 
-    internal void QueueSession(string? sessionKey) => _pendingSessionKey = sessionKey;
+    internal void QueueSession(string? sessionKey)
+    {
+        _pendingSessionKey = sessionKey;
+        if (!string.IsNullOrEmpty(sessionKey))
+            _sessionRemoved = false;
+    }
+
+    internal void ClearRemovedSession(string key)
+    {
+        _sessionRemoved = true;
+        _surfaceGeneration++;
+        _pendingSessionKey = null;
+        _pendingWebViewSessionKey = null;
+        if (_hub?.PendingChatSessionKey == key)
+            _hub.PendingChatSessionKey = null;
+        if (CurrentApp.PendingChatSessionKey == key)
+            CurrentApp.PendingChatSessionKey = null;
+        _nativeSetupBinding.Invalidate();
+        _pendingVoice.Cancel();
+        _navigationCts?.Cancel();
+        _navigationStarted = false;
+        _chatUrl = null;
+        DisposeReactorHost();
+        StopWebViewNavigation();
+        ShowRemovedSession();
+    }
+
+    private void ShowRemovedSession()
+    {
+        ChatHost.Visibility = WebView.Visibility = ToolbarBorder.Visibility =
+            PlaceholderPanel.Visibility = WaitingPanel.Visibility = ErrorPanel.Visibility =
+            NativeSetupError.Visibility = LoadingRing.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
+        RemovedSessionPlaceholder.Visibility = Visibility.Visible;
+    }
 
     private void OnWorkspaceOpenConnection(object sender, RoutedEventArgs e) =>
         ((IAppCommands)CurrentApp).Navigate("connection");
@@ -245,6 +281,12 @@ public sealed partial class ChatPage : Page
     {
         if (CurrentApp.Settings is not { } settings) return;
         var generation = ++_surfaceGeneration;
+        if (_sessionRemoved)
+        {
+            ShowRemovedSession();
+            return;
+        }
+        RemovedSessionPlaceholder.Visibility = Visibility.Collapsed;
         if (_nativeSetupBinding.Request is not null)
         {
             try
@@ -704,12 +746,12 @@ public sealed partial class ChatPage : Page
             return;
         }
 
-        _ = InitializeWebViewAsync(credential);
+        _ = InitializeWebViewAsync(credential, _surfaceGeneration);
     }
 
     private bool NavigateWebViewToCurrentChatUrl()
     {
-        if (string.IsNullOrEmpty(_chatUrl) || WebView.CoreWebView2 is null)
+        if (_sessionRemoved || string.IsNullOrEmpty(_chatUrl) || WebView.CoreWebView2 is null)
             return false;
 
         ChatPagePanelStates.ApplyShowingWebView(PanelHost);
@@ -770,7 +812,7 @@ public sealed partial class ChatPage : Page
             app.SetHubNativeChatSurfaceActive(_pageActive && !_webViewMode && _reactorHost is not null);
     }
 
-    private async Task InitializeWebViewAsync(InteractiveGatewayCredential credential)
+    private async Task InitializeWebViewAsync(InteractiveGatewayCredential credential, int generation)
     {
         try
         {
@@ -801,10 +843,14 @@ public sealed partial class ChatPage : Page
             LoadingRing.Visibility = Visibility.Visible;
 
             await GatewayChatHelper.InitializeWebView2Async(WebView);
+            if (_sessionRemoved || generation != _surfaceGeneration)
+                return;
             _webViewInitialized = true;
 
             _navCompletedHandler = (s, e) =>
             {
+                if (_sessionRemoved || !_webViewMode)
+                    return;
                 LoadingRing.IsActive = false;
                 LoadingRing.Visibility = Visibility.Collapsed;
 
@@ -834,6 +880,8 @@ public sealed partial class ChatPage : Page
 
             _navStartingHandler = (s, e) =>
             {
+                if (_sessionRemoved || !_webViewMode)
+                    return;
                 LoadingRing.IsActive = true;
                 LoadingRing.Visibility = Visibility.Visible;
             };
@@ -846,6 +894,11 @@ public sealed partial class ChatPage : Page
         }
         catch (Exception ex)
         {
+            if (_sessionRemoved || generation != _surfaceGeneration)
+            {
+                Logger.Warn($"[ChatPage] Superseded WebView initialization failed ({ex.GetType().Name}).");
+                return;
+            }
             LoadingRing.IsActive = false;
             LoadingRing.Visibility = Visibility.Collapsed;
             PlaceholderPanel.Visibility = Visibility.Collapsed;

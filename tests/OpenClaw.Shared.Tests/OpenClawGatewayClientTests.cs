@@ -593,6 +593,112 @@ public class OpenClawGatewayClientTests
     private static string CreateTempIdentityPath() =>
         Path.Combine(Path.GetTempPath(), "OpenClawGatewayClientTests", Guid.NewGuid().ToString("N"));
 
+    private static Task ConfirmMutation(OpenClawGatewayClient client, bool delete, int timeoutMs = 10000) =>
+        delete
+            ? client.DeleteSessionConfirmedAsync("agent:test:session", client.SessionMutationConnectionEpoch!.Value, timeoutMs)
+            : client.PatchSessionConfirmedAsync("agent:test:session", new SessionPatch { Archived = true },
+                client.SessionMutationConnectionEpoch!.Value, timeoutMs);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmedMutation_WaitsForMatchingResponseWithoutGlobalActionNoise(bool delete)
+    {
+        using var server = new LoopbackWebSocketServer();
+        using var identity = new TempDirectory("session-mutation-");
+        await server.StartAsync();
+        var helper = new GatewayClientTestHelper(gatewayUrl: server.WebSocketUrl, identityPath: identity.Path);
+        using var client = helper.Client;
+        await client.ConnectAsync();
+        helper.MarkHandshakeReady();
+        var events = 0;
+        client.SessionCommandCompleted += (_, _) => events++;
+        var task = ConfirmMutation(client, delete);
+        var request = await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        using var frame = JsonDocument.Parse(request);
+        Assert.Equal(delete ? "sessions.delete" : "sessions.patch", frame.RootElement.GetProperty("method").GetString());
+        Assert.Equal("agent:test:session", frame.RootElement.GetProperty("params").GetProperty("key").GetString());
+        Assert.False(task.IsCompleted);
+        await server.SendTextAsync("""{"type":"res","id":"wrong-id","ok":true,"payload":{}}""");
+        // A second, correlated response serves as an ordering barrier after the unmatched response.
+        var probe = client.SendWizardRequestAsync("health");
+        var probeId = ReadRequestId(await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2)));
+        await server.SendTextAsync(JsonSerializer.Serialize(new { type = "res", id = probeId, ok = true, payload = new { } }));
+        await probe.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(task.IsCompleted);
+        await server.SendTextAsync(JsonSerializer.Serialize(new
+        {
+            type = "res", id = ReadRequestId(request), ok = true,
+            payload = new { ok = true, key = "agent:test:session", deleted = true }
+        }));
+        await task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(0, events);
+        Assert.Equal(0, helper.GetPendingRequestCount());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ConfirmedMutation_RejectsEnvelopeAndPayloadFailures(bool delete, bool payloadRejection)
+    {
+        using var server = new LoopbackWebSocketServer();
+        using var identity = new TempDirectory("session-mutation-");
+        await server.StartAsync();
+        var helper = new GatewayClientTestHelper(gatewayUrl: server.WebSocketUrl, identityPath: identity.Path);
+        using var client = helper.Client;
+        await client.ConnectAsync();
+        helper.MarkHandshakeReady();
+        var task = ConfirmMutation(client, delete);
+        var id = ReadRequestId(await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2)));
+        await server.SendTextAsync(JsonSerializer.Serialize(new
+        {
+            type = "res", id, ok = payloadRejection,
+            error = new { message = "permission denied" },
+            payload = new { ok = false, reason = "permission denied" }
+        }));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => task);
+        Assert.Equal("permission denied", error.Message);
+        Assert.Equal(0, helper.GetPendingRequestCount());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmedMutation_TimeoutCleansTrackingAndLateResponseCannotAccept(bool delete)
+    {
+        using var server = new LoopbackWebSocketServer();
+        using var identity = new TempDirectory("session-mutation-");
+        await server.StartAsync();
+        var helper = new GatewayClientTestHelper(gatewayUrl: server.WebSocketUrl, identityPath: identity.Path);
+        using var client = helper.Client;
+        await client.ConnectAsync();
+        helper.MarkHandshakeReady();
+        var task = ConfirmMutation(client, delete, 250);
+        var id = ReadRequestId(await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2)));
+        await Assert.ThrowsAsync<TimeoutException>(() => task);
+        await server.SendTextAsync(JsonSerializer.Serialize(new { type = "res", id, ok = true, payload = new { } }));
+        await Assert.ThrowsAsync<TimeoutException>(() => task);
+        Assert.Equal(0, helper.GetPendingRequestCount());
+    }
+
+    [Fact]
+    public async Task ConfirmedMutation_RefusesCapturedEpochAfterConnectionChanged()
+    {
+        using var server = new LoopbackWebSocketServer();
+        using var identity = new TempDirectory("session-mutation-");
+        await server.StartAsync();
+        var helper = new GatewayClientTestHelper(gatewayUrl: server.WebSocketUrl, identityPath: identity.Path);
+        using var client = helper.Client;
+        await client.ConnectAsync();
+        helper.MarkHandshakeReady();
+        var epoch = client.SessionMutationConnectionEpoch!.Value;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.DeleteSessionConfirmedAsync("agent:test:session", epoch - 1));
+        Assert.Equal(0, helper.GetPendingRequestCount());
+    }
+
     [Fact]
     public async Task SendWizardRequestAsync_ResponseBeforeDispose_ReturnsPayloadAndCleansTracking()
     {

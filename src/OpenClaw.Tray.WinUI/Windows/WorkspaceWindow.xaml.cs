@@ -380,7 +380,7 @@ public sealed partial class WorkspaceWindow : WindowEx
         return item;
     }
 
-    private void ApplySessionItem(NavigationViewItem item, WorkspaceSession session)
+    internal static Grid BuildSessionContent(WorkspaceSession session)
     {
         var grid = new Grid { ColumnSpacing = 6 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
@@ -402,7 +402,7 @@ public sealed partial class WorkspaceWindow : WindowEx
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        Grid.SetColumn(title, session.IsPinned ? 1 : 0);
+        Grid.SetColumn(title, 1);
         grid.Children.Add(title);
         if (session.IsWorking)
         {
@@ -430,8 +430,13 @@ public sealed partial class WorkspaceWindow : WindowEx
             Grid.SetColumn(dot, 2);
             grid.Children.Add(dot);
         }
+        return grid;
+    }
+
+    private void ApplySessionItem(NavigationViewItem item, WorkspaceSession session)
+    {
         item.Tag = session;
-        item.Content = grid;
+        item.Content = BuildSessionContent(session);
         item.ContextFlyout = _sessionMenu.CreateFlyout(session);
         AutomationProperties.SetName(item, session.Title);
         ToolTipService.SetToolTip(item, session.Title);
@@ -564,14 +569,17 @@ public sealed partial class WorkspaceWindow : WindowEx
 
     private void LeaveSession(string key)
     {
-        if (Destination is not { Page: WorkspacePageId.Home, SessionKey: { } current } || current != key)
-            return;
         var next = WorkspaceProjection.Sessions(_state.Sessions, _agentId, _sessionOrder)
             .FirstOrDefault(session => session.Key != key);
-        if (next is { } nextSession)
-            SelectSession(nextSession.Key);
-        else
-            Navigate(new(WorkspacePageId.Home), preserveConversation: false);
+        var wasChatDestination = _navigation.ChatDestination.SessionKey == key;
+        var wasCurrent = _navigation.RemoveSession(key, next?.Key);
+        if (wasChatDestination)
+            _chat.ClearRemovedSession(key);
+        if (wasCurrent)
+            RenderDestination();
+        UpdateNavigationSelection();
+        BackButton.IsEnabled = _navigation.CanGoBack;
+        ForwardButton.IsEnabled = _navigation.CanGoForward;
     }
 
     private void OnStateChanged(object? sender, PropertyChangedEventArgs e)

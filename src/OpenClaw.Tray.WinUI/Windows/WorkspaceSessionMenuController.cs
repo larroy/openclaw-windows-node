@@ -6,6 +6,7 @@ using OpenClaw.Shared;
 using OpenClaw.Shared.Sessions;
 using OpenClawTray.Helpers;
 using OpenClawTray.Presentation;
+using OpenClawTray.Services;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Pickers;
@@ -66,16 +67,24 @@ internal sealed class WorkspaceSessionMenuController
 
 
     /// <summary>
-    /// Background read acknowledgement for a session the user just opened
-    /// (<c>unread:false</c> + concurrency guard). A failed send is ignored on
-    /// purpose: the dot clears on the next list refresh either way.
+    /// Background read acknowledgement uses the same acceptance contract, but
+    /// reports failure to diagnostics rather than producing a user-action toast.
     /// </summary>
-    public Task AcknowledgeReadAsync(SessionInfo session)
+    public async Task AcknowledgeReadAsync(SessionInfo session)
     {
         var client = _client();
         if (!session.Unread || client is not { IsConnectedToGateway: true })
-            return Task.CompletedTask;
-        return PatchAsync(session.Key, WorkspaceSessionMenu.ReadAcknowledgementPatch(session.MarkedUnreadAt));
+            return;
+        var operation = new WorkspaceSessionOperation(client, _client);
+        try
+        {
+            await operation.PatchAsync(session.Key, WorkspaceSessionMenu.ReadAcknowledgementPatch(session.MarkedUnreadAt));
+            await RefreshAsync(operation);
+        }
+        catch (Exception ex)
+        {
+            new AppLogger().Warn($"[Workspace] Read acknowledgement failed ({ex.GetType().Name}). Unread state will be reconciled on refresh.");
+        }
     }
 
     private void OnFlyoutOpening(object? sender, object e)
@@ -182,6 +191,26 @@ internal sealed class WorkspaceSessionMenuController
 
     private async Task RunAsync(WorkspaceSessionMenuAction action, WorkspaceSession session, SessionInfo? info)
     {
+        try
+        {
+            await RunActionAsync(action, session, info);
+        }
+        catch (WorkspaceSessionConnectionChangedException)
+        {
+            _showMessage(WorkspaceWindow.Text("SessionConnectionChanged"), InfoBarSeverity.Error);
+        }
+        catch (TimeoutException)
+        {
+            _showMessage(WorkspaceWindow.Text("SessionActionTimedOut"), InfoBarSeverity.Error);
+        }
+        catch (Exception ex)
+        {
+            _reportError($"session-{action}", ex);
+        }
+    }
+
+    private async Task RunActionAsync(WorkspaceSessionMenuAction action, WorkspaceSession session, SessionInfo? info)
+    {
         var client = _client();
         if (client is not { IsConnectedToGateway: true } &&
             action is not (WorkspaceSessionMenuAction.CopyKey or WorkspaceSessionMenuAction.CopySessionId))
@@ -190,19 +219,20 @@ internal sealed class WorkspaceSessionMenuController
             return;
         }
 
+        var operation = client is null ? null : new WorkspaceSessionOperation(client, _client);
         switch (action)
         {
             case WorkspaceSessionMenuAction.TogglePin:
-                await PatchAsync(session.Key, new SessionPatch { Pinned = !session.IsPinned });
+                await PatchAsync(operation!, session.Key, new SessionPatch { Pinned = !session.IsPinned });
                 break;
             case WorkspaceSessionMenuAction.ToggleUnread:
-                await PatchAsync(session.Key, new SessionPatch { Unread = !session.IsUnread });
+                await PatchAsync(operation!, session.Key, new SessionPatch { Unread = !session.IsUnread });
                 break;
             case WorkspaceSessionMenuAction.ToggleArchive:
-                await ToggleArchiveAsync(client!, session, info);
+                await ToggleArchiveAsync(operation!, session, info);
                 break;
             case WorkspaceSessionMenuAction.Rename:
-                await RenameAsync(client!, session, info);
+                await RenameAsync(operation!, session, info);
                 break;
             case WorkspaceSessionMenuAction.Fork:
                 await _forkSession(WorkspaceSessionMenu.ForkRequest(
@@ -218,13 +248,13 @@ internal sealed class WorkspaceSessionMenuController
                 await CopyMarkdownAsync(client!, session);
                 break;
             case WorkspaceSessionMenuAction.Reset:
-                await RunLifecycleAsync(client!, SessionActionKind.Reset, session, info);
+                await RunLifecycleAsync(operation!, SessionActionKind.Reset, session, info);
                 break;
             case WorkspaceSessionMenuAction.Compact:
-                await RunLifecycleAsync(client!, SessionActionKind.Compact, session, info);
+                await RunLifecycleAsync(operation!, SessionActionKind.Compact, session, info);
                 break;
             case WorkspaceSessionMenuAction.Delete:
-                await RunLifecycleAsync(client!, SessionActionKind.Delete, session, info);
+                await RunLifecycleAsync(operation!, SessionActionKind.Delete, session, info);
                 break;
             case WorkspaceSessionMenuAction.ExportTranscript:
                 await ExportTranscriptAsync(client!, session);
@@ -232,8 +262,9 @@ internal sealed class WorkspaceSessionMenuController
         }
     }
 
-    private async Task ToggleArchiveAsync(IOperatorGatewayClient client, WorkspaceSession session, SessionInfo? info)
+    private async Task ToggleArchiveAsync(WorkspaceSessionOperation operation, WorkspaceSession session, SessionInfo? info)
     {
+        operation.RequireCurrent();
         if (!session.IsArchived)
         {
             // Archiving the open conversation must navigate away before the row
@@ -241,7 +272,7 @@ internal sealed class WorkspaceSessionMenuController
             var mainState = SessionActionPlanner.ResolveMainState(
                 session.Key,
                 rowIsMain: info?.IsMain,
-                mainSessionKey: client.MainSessionKey,
+                mainSessionKey: operation.Client.MainSessionKey,
                 sessions: _activeSessions());
             if (!WorkspaceSessionMenu.CanArchiveOrDelete(mainState))
             {
@@ -253,27 +284,34 @@ internal sealed class WorkspaceSessionMenuController
                 return;
             }
         }
-        if (!await PatchAsync(session.Key, new SessionPatch { Archived = !session.IsArchived }))
-            return;
+        await operation.PatchAsync(session.Key, new SessionPatch { Archived = !session.IsArchived });
         if (!session.IsArchived)
             _leaveSession(session.Key);
+        await RefreshAsync(operation);
     }
 
-    private async Task<bool> PatchAsync(string key, SessionPatch patch)
+    private async Task PatchAsync(WorkspaceSessionOperation operation, string key, SessionPatch patch)
     {
-        var client = _client();
-        if (client is not { IsConnectedToGateway: true })
-            return false;
-        if (!await client.PatchSessionAsync(key, patch))
-        {
-            _showMessage(WorkspaceWindow.Text("SessionActionFailed"), InfoBarSeverity.Error);
-            return false;
-        }
-        // List refresh arrives via sessions.changed; nothing to do here.
-        return true;
+        await operation.PatchAsync(key, patch);
+        await RefreshAsync(operation);
     }
 
-    private async Task RenameAsync(IOperatorGatewayClient client, WorkspaceSession session, SessionInfo? info)
+    private async Task RefreshAsync(WorkspaceSessionOperation operation)
+    {
+        if (!operation.IsCurrent)
+            return;
+        try
+        {
+            await operation.Client.RequestSessionsAsync();
+        }
+        catch (Exception ex)
+        {
+            // Acceptance already happened; a refresh error must not be reported as a rejected mutation.
+            new AppLogger().Warn($"[Workspace] Session mutation accepted, but refresh failed ({ex.GetType().Name}).");
+        }
+    }
+
+    private async Task RenameAsync(WorkspaceSessionOperation operation, WorkspaceSession session, SessionInfo? info)
     {
         if (_dialogOpen || _xamlRoot() is not { } xamlRoot)
             return;
@@ -313,7 +351,7 @@ internal sealed class WorkspaceSessionMenuController
                 XamlRoot = xamlRoot,
             };
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-                await PatchAsync(session.Key, WorkspaceSessionMenu.RenamePatch(input.Text));
+                await PatchAsync(operation, session.Key, WorkspaceSessionMenu.RenamePatch(input.Text));
         }
         finally
         {
@@ -366,8 +404,10 @@ internal sealed class WorkspaceSessionMenuController
     }
 
     private async Task RunLifecycleAsync(
-        IOperatorGatewayClient client, SessionActionKind kind, WorkspaceSession session, SessionInfo? info)
+        WorkspaceSessionOperation operation, SessionActionKind kind, WorkspaceSession session, SessionInfo? info)
     {
+        operation.RequireCurrent();
+        var client = operation.Client;
         var mainState = SessionActionPlanner.ResolveMainState(
             session.Key,
             rowIsMain: info?.IsMain,
@@ -382,6 +422,7 @@ internal sealed class WorkspaceSessionMenuController
         var prompt = SessionActionPlanner.BuildPrompt(kind, session.Key, session.Title, mainState == SessionMainState.Main);
         if (prompt is not null && !await ConfirmAsync(prompt))
             return;
+        operation.RequireCurrent();
 
         if (kind == SessionActionKind.Delete)
         {
@@ -398,13 +439,18 @@ internal sealed class WorkspaceSessionMenuController
             }
         }
 
-        try
+        if (kind == SessionActionKind.Delete)
+        {
+            await operation.DeleteAsync(session.Key);
+            _leaveSession(session.Key);
+            await RefreshAsync(operation);
+        }
+        else
         {
             var sent = kind switch
             {
                 SessionActionKind.Reset => await client.ResetSessionAsync(session.Key),
                 SessionActionKind.Compact => await client.CompactSessionAsync(session.Key),
-                SessionActionKind.Delete => await client.DeleteSessionAsync(session.Key),
                 _ => true,
             };
             if (!sent)
@@ -412,12 +458,6 @@ internal sealed class WorkspaceSessionMenuController
                 _showMessage(WorkspaceWindow.Text("SessionActionFailed"), InfoBarSeverity.Error);
                 return;
             }
-            if (kind == SessionActionKind.Delete)
-                _leaveSession(session.Key);
-        }
-        catch (Exception ex)
-        {
-            _reportError($"session-{kind.ToString().ToLowerInvariant()}", ex);
         }
     }
 

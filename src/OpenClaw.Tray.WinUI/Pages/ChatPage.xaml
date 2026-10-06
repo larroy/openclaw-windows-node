@@ -60,6 +60,13 @@
 
         <!-- Native chat host: the Reactor tree mounts into this Border (default UI). -->
         <Border x:Name="ChatHost" Grid.Row="1"/>
+        <TextBlock x:Name="RemovedSessionPlaceholder" x:Uid="WorkspaceShell_SelectConversation"
+                   AutomationProperties.AutomationId="WorkspaceSelectConversation"
+                   Grid.Row="1" Visibility="Collapsed"
+                   Text="Select a conversation or create a new one to start chatting."
+                   TextWrapping="Wrap" MaxWidth="360"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Style="{StaticResource BodyTextBlockStyle}"/>
 
         <!-- WebView2 host: only created/used when "Use standard Gateway Chat interface" is enabled. -->
         <WebView2 x:Name="WebView" Grid.Row="1" Visibility="Collapsed"/>

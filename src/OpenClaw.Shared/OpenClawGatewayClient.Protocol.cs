@@ -479,6 +479,39 @@ public partial class OpenClawGatewayClient
         return TrySendTrackedRequestAsync("sessions.patch", patch.ToPayload(key));
     }
 
+    public async Task PatchSessionConfirmedAsync(
+        string key, SessionPatch patch, long connectionEpoch, int timeoutMs = 15000)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(patch);
+        if (!patch.HasChanges)
+            throw new ArgumentException("The session patch must contain a change.", nameof(patch));
+        var payload = await SendResponseRequestAsync(
+            "sessions.patch", patch.ToPayload(key), timeoutMs, connectionEpoch).ConfigureAwait(false);
+        RequireSessionMutationAccepted(payload, key);
+    }
+
+    public async Task DeleteSessionConfirmedAsync(string key, long connectionEpoch, int timeoutMs = 15000)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        var payload = await SendResponseRequestAsync(
+            "sessions.delete", new { key, deleteTranscript = true }, timeoutMs, connectionEpoch).ConfigureAwait(false);
+        RequireSessionMutationAccepted(payload, key);
+        if (payload.TryGetProperty("deleted", out var deleted) && deleted.ValueKind != JsonValueKind.True)
+            throw new InvalidOperationException("The Gateway did not delete the session.");
+    }
+
+    private static void RequireSessionMutationAccepted(JsonElement payload, string key)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("The Gateway returned an invalid session mutation response.");
+        if (payload.TryGetProperty("ok", out var ok) && ok.ValueKind != JsonValueKind.True)
+            throw new InvalidOperationException(GetString(payload, "reason") ?? "The Gateway rejected the session mutation.");
+        if (payload.TryGetProperty("key", out var returnedKey) &&
+            (returnedKey.ValueKind != JsonValueKind.String || returnedKey.GetString() != key))
+            throw new InvalidOperationException("The Gateway returned a different session key.");
+    }
+
     // ── sessions.list (archived) ──
 
     /// <summary>

@@ -1,6 +1,41 @@
 # Workspace chat: sidebar session context menu: implementation summary and proof
 
-Commit: `f51a70a9` on `main`, pushed to fork `larroy/openclaw-windows-node`.
+Initial implementation: `f51a70a9`. The original measurements below are historical,
+not final-head validation.
+
+## Review repairs
+
+The Workspace menu now awaits matching Gateway acceptance for patch/delete rather
+than treating a successful socket write as a successful mutation. A captured
+operator client and authenticated transport epoch are checked before dispatch
+and after responses. Rename cannot retarget a different Gateway while its dialog
+is open. Rejections are shown in the Workspace; timeouts explicitly report an
+unknown outcome and are not retried automatically.
+
+Existing send-only APIs, including Reset/Compact event consumers, retain their
+semantics. Confirmed patch/delete do not emit generic session-action events.
+The menu requests a fresh session list after acceptance. Automatic read
+acknowledgement uses the confirmed path without action toasts; failures are
+recorded in diagnostics and leave authoritative unread state untouched.
+
+Confirmed removal prunes the session from back/forward and remembered chat
+destinations. The retained ChatPage explicitly disposes the removed conversation,
+cancels pending navigation, and shows a noninteractive selection prompt if there
+is no replacement. Normal Home navigation still preserves drafts. Every row title
+uses the constrained Star column, preserving room for the optional pin and
+busy/unread indicator.
+
+Regression coverage includes correlated response acceptance, rejected envelopes
+and payloads, timeout/late response, connection changes across dialogs/responses,
+history pruning, and real WinUI long-title layout. The opt-in in-memory Gateway
+fixture supports held session mutations; ordinary browse fixtures stay read-only.
+Real-app tests drive the context menu with Shift+F10, prove that a held response
+does not navigate, preserve a draft after rejection, and remove the final
+conversation without retaining its composer or creating a new session.
+
+Validation is recorded in the PR with exact commands and source revision.
+Synthetic Gateway proof establishes Companion behavior, not live Gateway
+compatibility or managed-local credential-resolution timing.
 
 ## Scope delivered
 

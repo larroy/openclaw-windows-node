@@ -336,6 +336,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     /// application-send paths.
     /// </summary>
     public virtual bool IsConnectedToGateway => TryGetReadyConnectionGeneration(out _);
+    public long? SessionMutationConnectionEpoch =>
+        TryGetReadyConnectionGeneration(out var generation) ? generation : null;
     private string[] _advertisedServerMethods = [];
     private long _serverHandshakeGeneration;
     public IReadOnlyList<string> AdvertisedServerMethods => Array.AsReadOnly(Volatile.Read(ref _advertisedServerMethods));
@@ -1300,9 +1302,15 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     private const string HandshakePendingError =
         "Gateway handshake has not completed (hello-ok pending)";
 
-    public async Task<JsonElement> SendWizardRequestAsync(string method, object? parameters = null, int timeoutMs = 30000)
+    public Task<JsonElement> SendWizardRequestAsync(string method, object? parameters = null, int timeoutMs = 30000) =>
+        SendResponseRequestAsync(method, parameters, timeoutMs);
+
+    private async Task<JsonElement> SendResponseRequestAsync(
+        string method, object? parameters, int timeoutMs, long? expectedConnectionEpoch = null)
     {
         var connectionGeneration = GetReadyConnectionGeneration(method);
+        if (expectedConnectionEpoch.HasValue && connectionGeneration != expectedConnectionEpoch.Value)
+            throw new InvalidOperationException("The Gateway connection changed before the request could be sent.");
 
         // #1418: wizard requests are application RPCs (models.list,
         // device.pair.list, pairing approvals, update.status, chat.abort,

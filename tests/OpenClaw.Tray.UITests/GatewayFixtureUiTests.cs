@@ -25,6 +25,82 @@ public sealed class GatewayFixtureUiTests(ITestOutputHelper output)
 {
     [GatewayFixtureUiFact]
     [Trait("Category", "GatewayFixture")]
+    public async Task SessionRemoval_WaitsForAcceptanceAndClearsLastMountedConversation()
+    {
+        await WithAppAsync(async run =>
+        {
+            await run.InvokeAsync("app.navigate", new { page = "chat" });
+            await SelectSessionAsync(run, GatewayScenario.OtherTitle, GatewayScenario.OtherSessionKey);
+            run.Gateway.HoldSessionMutations();
+            await OpenSessionMenuAsync(run, GatewayScenario.OtherSessionKey);
+            Invoke(FindById(run, "WorkspaceSessionMenuToggleArchive")!);
+            await run.Gateway.WaitForRequestAsync("sessions.patch", GatewayScenario.OtherSessionKey);
+            Assert.NotNull(FindById(run, "ChatComposerInput"));
+            Assert.True(SessionSelected(run, GatewayScenario.OtherTitle));
+            await CaptureIfRequestedAsync(run, "archive-pending.png");
+            run.Gateway.ReleaseSessionMutations();
+            await WaitUiAsync(run, () => FindById(run, $"WorkspaceSession:{GatewayScenario.OtherSessionKey}") is null,
+                "accepted archive removed from active rows");
+            await WaitUiAsync(run, () => SessionSelected(run, GatewayScenario.EdgeTitle),
+                "accepted archive selected the remaining conversation");
+            await WaitHistoryAsync(run, GatewayScenario.EdgeSessionKey);
+            await OpenSessionMenuAsync(run, GatewayScenario.EdgeSessionKey);
+            Invoke(FindById(run, "WorkspaceSessionMenuDelete")!);
+            await WaitUiAsync(run, () => FindButton(run, "Delete") is not null, "delete confirmation");
+            Invoke(FindButton(run, "Delete")!);
+            await WaitUiAsync(run, () => FindById(run, "WorkspaceSelectConversation") is { Current.IsOffscreen: false },
+                "explicit empty chat after last removal");
+            Assert.Null(FindById(run, "ChatComposerInput"));
+            await CaptureIfRequestedAsync(run, "last-session-removed.png");
+            if (FindById(run, "WorkspaceBack") is { Current.IsEnabled: true } back)
+            {
+                Invoke(back);
+                await WaitUiAsync(run, () => !SessionSelected(run, GatewayScenario.EdgeTitle), "history excludes removed session");
+            }
+            Assert.DoesNotContain(run.Gateway.Requests, request => request.Method == "chat.send");
+            Assert.DoesNotContain(run.Gateway.Requests, request => request.Method == "sessions.create");
+        }, allowSessionMutations: true);
+    }
+
+    [GatewayFixtureUiFact]
+    [Trait("Category", "GatewayFixture")]
+    public async Task SessionRemoval_RejectionPreservesSelectedConversationAndDraft()
+    {
+        await WithAppAsync(async run =>
+        {
+            await run.InvokeAsync("app.navigate", new { page = "chat" });
+            await SelectSessionAsync(run, GatewayScenario.OtherTitle, GatewayScenario.OtherSessionKey);
+            const string draft = "Keep this draft after rejection";
+            ((ValuePattern)FindById(run, "ChatComposerInput")!.GetCurrentPattern(ValuePattern.Pattern)).SetValue(draft);
+            await OpenSessionMenuAsync(run, GatewayScenario.OtherSessionKey);
+            Invoke(FindById(run, "WorkspaceSessionMenuToggleArchive")!);
+            await WaitUiAsync(run, () => FindText(run, "Fixture Gateway is read-only") is not null, "visible archive rejection");
+            Assert.True(SessionSelected(run, GatewayScenario.OtherTitle));
+            Assert.Equal(draft, ((ValuePattern)FindById(run, "ChatComposerInput")!.GetCurrentPattern(ValuePattern.Pattern)).Current.Value);
+            await CaptureIfRequestedAsync(run, "archive-rejected.png");
+        });
+    }
+
+    private static async Task OpenSessionMenuAsync(GatewayFixtureRun run, string key)
+    {
+        var window = AppWindows(run).First(window => window.FindFirst(TreeScope.Descendants,
+            new PropertyCondition(AutomationElement.AutomationIdProperty, $"WorkspaceSession:{key}")) is not null);
+        if (!SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle)))
+            throw new InvalidOperationException("Cannot activate the isolated Workspace for keyboard proof.");
+        var row = FindById(run, $"WorkspaceSession:{key}")!;
+        row.SetFocus();
+        await WaitUiAsync(run, () => FindById(run, $"WorkspaceSession:{key}")?.Current.HasKeyboardFocus == true,
+            "session row keyboard focus");
+        System.Windows.Forms.SendKeys.SendWait("+{F10}");
+        await WaitUiAsync(run, () => FindById(run, "WorkspaceSessionMenuToggleArchive") is not null, "session context menu");
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    [GatewayFixtureUiFact]
+    [Trait("Category", "GatewayFixture")]
     public async Task OwnerFooterUsesAuthenticatedProfileAndLiveConnectionStatus()
     {
         await WithAppAsync(async run =>
@@ -352,13 +428,14 @@ public sealed class GatewayFixtureUiTests(ITestOutputHelper output)
     }
 
     private async Task WithAppAsync(Func<GatewayFixtureRun, Task> test, bool allowAgentCreation = false,
-        bool requireAgentSelection = false)
+        bool requireAgentSelection = false, bool allowSessionMutations = false)
     {
         var appPath = Environment.GetEnvironmentVariable("OPENCLAW_GATEWAY_FIXTURE_APP")
             ?? throw new InvalidOperationException("Set OPENCLAW_GATEWAY_FIXTURE_APP to the freshly built app. No installed-app fallback is allowed.");
         await using var run = await GatewayFixtureRun.StartAsync(appPath,
             Environment.GetEnvironmentVariable("OPENCLAW_GATEWAY_FIXTURE_ARTIFACTS"),
-            allowAgentCreation: allowAgentCreation, requireAgentSelection: requireAgentSelection);
+            allowAgentCreation: allowAgentCreation, requireAgentSelection: requireAgentSelection,
+            allowSessionMutations: allowSessionMutations);
         output.WriteLine($"Fixture run {run.Profile.RunId}, PID {run.AppProcessId}, artifacts: {run.ArtifactsDirectory}");
         try
         {

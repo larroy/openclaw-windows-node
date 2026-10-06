@@ -7,6 +7,39 @@ namespace OpenClaw.Tray.Tests.Presentation;
 
 public sealed class WorkspaceNavigationTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("replacement")]
+    public void RemovedSession_CannotReturnThroughHistory(string? replacement)
+    {
+        var history = new WorkspaceNavigationHistory();
+        history.Navigate(new(WorkspacePageId.Home, "kept"));
+        history.Navigate(new(WorkspacePageId.Home, "removed"));
+        history.Navigate(new(WorkspacePageId.Notifications));
+        history.GoBack();
+        Assert.True(history.RemoveSession("removed", replacement));
+        Assert.Equal(replacement, history.Current.SessionKey);
+        Assert.Equal(replacement, history.ChatDestination.SessionKey);
+        while (history.GoBack())
+            Assert.NotEqual("removed", history.Current.SessionKey);
+        while (history.GoForward())
+            Assert.NotEqual("removed", history.Current.SessionKey);
+    }
+
+    [Fact]
+    public void RemovingRememberedChat_PreservesNotificationsAndUnrelatedHistory()
+    {
+        var history = new WorkspaceNavigationHistory();
+        history.Navigate(new(WorkspacePageId.Home, "kept"));
+        history.Navigate(new(WorkspacePageId.Home, "removed"));
+        history.Navigate(new(WorkspacePageId.Notifications));
+        Assert.False(history.RemoveSession("removed", null));
+        Assert.Equal(WorkspacePageId.Notifications, history.Current.Page);
+        Assert.Null(history.ChatDestination.SessionKey);
+        Assert.True(history.GoBack());
+        Assert.Equal("kept", history.Current.SessionKey);
+    }
+
     [Fact]
     public void Workspace_OnlyHomeAndFooterNotificationsHaveTypedDestinations()
     {
