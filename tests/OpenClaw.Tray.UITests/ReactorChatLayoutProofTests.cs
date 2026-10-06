@@ -110,6 +110,10 @@ public sealed class ReactorChatLayoutProofTests(UIThreadFixture ui)
             await ui.RunOnUIAsync(() =>
             {
                 AssertComposerBounds(surface);
+                var attachGlyph = Assert.Single(FindDescendants<TextBlock>(FindControl<Button>(surface, "ChatComposerAttach"))).Text;
+                Assert.True(FluentIconCatalog.IsPuaGlyph(attachGlyph));
+                // The "+" glyph means "new" (sessions, /new); attach must stay visually distinct.
+                Assert.NotEqual(FluentIconCatalog.Add, attachGlyph);
                 var input = FindControl<TextBox>(surface, "ChatComposerInput");
                 Assert.Equal(Draft, input.Text);
                 Assert.Equal(TextWrapping.Wrap, input.TextWrapping);
