@@ -66,21 +66,10 @@ internal static class WorkspaceProjection
             .OrderByDescending(s => s.Pinned)
             .ThenByDescending(s => s.Pinned ? s.PinnedAt ?? 0 : 0)
             .ToArray();
-        return Project(sessions, archived: false);
+        return Project(sessions);
     }
 
-    /// <summary>Archived-only rows, already filtered by the gateway's archived list.</summary>
-    public static IReadOnlyList<WorkspaceSession> ArchivedSessions(IEnumerable<SessionInfo> source, string? agentId)
-    {
-        var sessions = source
-            .Where(session => !SessionDisplayResolver.IsBackground(session) &&
-                (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)))
-            .OrderByDescending(session => session.UpdatedAt)
-            .ToArray();
-        return Project(sessions, archived: true);
-    }
-
-    // The active sidebar hides archived rows; the archived section must never
+    // The active sidebar hides archived rows; Settings archives must never
     // influence the "latest session" per agent. Filtering only; ordering lives in Sessions.
     private static IEnumerable<SessionInfo> Visible(IEnumerable<SessionInfo> source, string? agentId) =>
         source
@@ -88,12 +77,11 @@ internal static class WorkspaceProjection
                 !SessionDisplayResolver.IsBackground(session) &&
                 (agentId is null || string.Equals(SessionDisplayResolver.Resolve(session).AgentId, agentId, StringComparison.Ordinal)));
 
-    private static IReadOnlyList<WorkspaceSession> Project(SessionInfo[] sessions, bool archived)
+    private static IReadOnlyList<WorkspaceSession> Project(SessionInfo[] sessions)
     {
         var titles = SessionTitleFormatter.FormatUnique(sessions);
         return sessions.Select((session, index) => new WorkspaceSession(
             session.Key, titles[index], SessionDisplayResolver.Resolve(session).AgentId,
-            session.Pinned && !archived, session.Unread && !archived, archived,
-            SessionRunState.IsWorking(session) && !archived)).ToArray();
+            session.Pinned, session.Unread, false, SessionRunState.IsWorking(session))).ToArray();
     }
 }

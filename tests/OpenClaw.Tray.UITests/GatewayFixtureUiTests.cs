@@ -25,6 +25,55 @@ public sealed class GatewayFixtureUiTests(ITestOutputHelper output)
 {
     [GatewayFixtureUiFact]
     [Trait("Category", "GatewayFixture")]
+    public async Task ArchivedConversationIsRestoredFromSettingsNotSidebar()
+    {
+        await WithAppAsync(async run =>
+        {
+            await run.InvokeAsync("app.navigate", new { page = "chat" });
+            await SelectSessionAsync(run, GatewayScenario.OtherTitle, GatewayScenario.OtherSessionKey);
+            Assert.Null(FindById(run, "WorkspaceArchivedToggle"));
+            await CaptureIfRequestedAsync(run, "sidebar-without-archives.png");
+            await OpenSessionMenuAsync(run, GatewayScenario.OtherSessionKey);
+            Invoke(FindById(run, "WorkspaceSessionMenuToggleArchive")!);
+            await WaitUiAsync(run, () => FindById(run, $"WorkspaceSession:{GatewayScenario.OtherSessionKey}") is null,
+                "archived conversation hidden from sidebar");
+
+            await run.InvokeAsync("app.navigate", new { page = "sessions" });
+            await WaitUiAsync(run, () => FindById(run, "SessionsPageArchived") is not null, "Settings archive section");
+            var section = FindById(run, "SessionsPageArchived")!;
+            ScrollAncestorToBottom(section);
+            ((ExpandCollapsePattern)section.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
+            var restoreId = $"SessionsPageUnarchive:{GatewayScenario.OtherSessionKey}";
+            await WaitUiAsync(run, () => FindById(run, restoreId) is not null, "archived conversation in Settings");
+            ScrollAncestorToBottom(FindById(run, restoreId)!);
+            await WaitUiAsync(run, () => FindById(run, restoreId)?.Current.IsOffscreen == false, "visible unarchive action");
+            await CaptureIfRequestedAsync(run, "settings-archived-conversation.png");
+            Invoke(FindById(run, restoreId)!);
+            await WaitUiAsync(run, () => FindById(run, restoreId) is null, "confirmed unarchive refresh");
+            await run.InvokeAsync("app.navigate", new { page = "chat" });
+            await WaitUiAsync(run, () => FindById(run, $"WorkspaceSession:{GatewayScenario.OtherSessionKey}") is not null,
+                "restored conversation returned to active sidebar");
+            await SelectSessionAsync(run, GatewayScenario.OtherTitle, GatewayScenario.OtherSessionKey);
+            Assert.Null(FindById(run, "WorkspaceArchivedToggle"));
+            Assert.True(SessionSelected(run, GatewayScenario.OtherTitle));
+        }, allowSessionMutations: true);
+    }
+
+    private static void ScrollAncestorToBottom(AutomationElement element)
+    {
+        for (AutomationElement? parent = element; parent is not null; parent = TreeWalker.ControlViewWalker.GetParent(parent))
+        {
+            if (parent.TryGetCurrentPattern(ScrollPattern.Pattern, out var pattern)
+                && ((ScrollPattern)pattern).Current.VerticallyScrollable)
+            {
+                ((ScrollPattern)pattern).SetScrollPercent(ScrollPattern.NoScroll, 100);
+                return;
+            }
+        }
+    }
+
+    [GatewayFixtureUiFact]
+    [Trait("Category", "GatewayFixture")]
     public async Task SessionRemoval_WaitsForAcceptanceAndClearsLastMountedConversation()
     {
         await WithAppAsync(async run =>

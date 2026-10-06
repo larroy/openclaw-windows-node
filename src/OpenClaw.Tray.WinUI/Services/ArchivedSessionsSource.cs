@@ -9,12 +9,13 @@ namespace OpenClawTray.Services;
 /// later requests set a re-run flag, and stale results are dropped by
 /// generation. Continuations stay on the UI thread on purpose.
 /// </summary>
-internal sealed class WorkspaceArchivedSessionsSource(Action changed)
+internal sealed class ArchivedSessionsSource(Action changed, Action<Exception> reportFailure)
 {
     private int _generation;
     private Task? _pending;
     private bool _refreshAgain;
     private IOperatorGatewayClient? _client;
+    private long? _connectionEpoch;
 
     public bool IsExpanded { get; private set; }
     public bool HasLoaded { get; private set; }
@@ -27,11 +28,12 @@ internal sealed class WorkspaceArchivedSessionsSource(Action changed)
         changed();
     }
 
-    /// <summary>Forgets the snapshot when the connection drops; the window owns when to call this.</summary>
+    /// <summary>Forgets the snapshot on disconnect or page unload.</summary>
     public void Clear()
     {
         _generation++;
         _client = null;
+        _connectionEpoch = null;
         _pending = null;
         _refreshAgain = false;
         Sessions = [];
@@ -45,8 +47,12 @@ internal sealed class WorkspaceArchivedSessionsSource(Action changed)
         if (!IsExpanded || client is not { IsConnectedToGateway: true })
             return Task.CompletedTask;
 
-        if (ReferenceEquals(client, _client) is false)
+        if (!ReferenceEquals(client, _client) || client.SessionMutationConnectionEpoch != _connectionEpoch)
+        {
+            Clear();
             _client = client;
+            _connectionEpoch = client.SessionMutationConnectionEpoch;
+        }
 
         if (_pending is { IsCompleted: false })
         {
@@ -54,10 +60,10 @@ internal sealed class WorkspaceArchivedSessionsSource(Action changed)
             return _pending;
         }
 
-        return _pending = LoadAsync(client, _generation);
+        return _pending = LoadAsync(client, _generation, _connectionEpoch);
     }
 
-    private async Task LoadAsync(IOperatorGatewayClient client, int generation)
+    private async Task LoadAsync(IOperatorGatewayClient client, int generation, long? connectionEpoch)
     {
         do
         {
@@ -80,12 +86,14 @@ internal sealed class WorkspaceArchivedSessionsSource(Action changed)
                 Sessions = [];
                 IsUnavailable = true;
                 HasLoaded = true;
+                reportFailure(ex);
                 changed();
                 return;
             }
         } while (IsCurrent() && _refreshAgain);
 
         bool IsCurrent() => generation == _generation &&
-            ReferenceEquals(client, _client) && client.IsConnectedToGateway;
+            ReferenceEquals(client, _client) && client.IsConnectedToGateway &&
+            client.SessionMutationConnectionEpoch == connectionEpoch;
     }
 }

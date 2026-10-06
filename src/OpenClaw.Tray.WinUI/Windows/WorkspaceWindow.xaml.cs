@@ -24,7 +24,6 @@ public sealed partial class WorkspaceWindow : WindowEx
     private readonly Action _openTimeline;
     private readonly AppNotificationService _notifications;
     private readonly WorkspaceIdentitySource _identity;
-    private readonly WorkspaceArchivedSessionsSource _archived;
     private readonly WorkspaceSessionMenuController _sessionMenu;
     private readonly WorkspaceNavigationHistory _navigation = new();
     private readonly WorkspaceSessionOrder _sessionOrder = new();
@@ -35,7 +34,6 @@ public sealed partial class WorkspaceWindow : WindowEx
     private readonly FontIcon _connectionStatusIcon = new();
     // Sidebar rows keyed by session key; SyncSessionItems keeps MenuItems in step with these.
     private readonly Dictionary<string, NavigationViewItem> _sessionItems = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, NavigationViewItem> _archivedSessionItems = new(StringComparer.Ordinal);
     private bool _updating;
     private bool _creatingSession;
     // Session switches commit sidebar/navigation state synchronously; the chat surface is
@@ -69,11 +67,9 @@ public sealed partial class WorkspaceWindow : WindowEx
         _openTimeline = openTimeline;
         _identity = new WorkspaceIdentitySource(UpdateOwnerIdentity,
             category => Logger.Warn($"[Workspace] users.self unavailable ({category}); using owner fallback."));
-        _archived = new WorkspaceArchivedSessionsSource(RefreshSidebar);
         _sessionMenu = new WorkspaceSessionMenuController(
             () => IsClosed ? null : CurrentApp.GatewayClient,
-            key => _state.Sessions.FirstOrDefault(s => s.Key == key)
-                ?? _archived.Sessions.FirstOrDefault(s => s.Key == key),
+            key => _state.Sessions.FirstOrDefault(s => s.Key == key),
             () => _state.Sessions,
             () => Root.XamlRoot,
             () => WinRT.Interop.WindowNative.GetWindowHandle(this),
@@ -105,8 +101,6 @@ public sealed partial class WorkspaceWindow : WindowEx
         UpdatePanePresentation();
         HomeLabel.Text = Text("Home");
         AutomationProperties.SetName(HomeItem, Text("Home"));
-        ArchivedLabel.Text = Text("Archived");
-        AutomationProperties.SetName(ArchivedToggle, Text("Archived"));
         UpdateOwnerIdentity();
         BuildOwnerMenu();
         _state.PropertyChanged += OnStateChanged;
@@ -311,19 +305,6 @@ public sealed partial class WorkspaceWindow : WindowEx
         AssistantSelector.PlaceholderText = Text(agents.Count == 0 ? "NoAgents" : "SelectAssistant");
         var sessions = WorkspaceProjection.Sessions(_state.Sessions, _agentId, _sessionOrder);
         SyncSessionItems(_sessionItems, sessions, "WorkspaceSession", NavView.MenuItems.IndexOf(SessionsEmpty) + 1);
-        var connected = _state.Status == ConnectionStatus.Connected;
-        ArchivedHeader.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
-        ArchivedChevron.Glyph = _archived.IsExpanded ? FluentIconCatalog.ChevronDown : FluentIconCatalog.ChevronR;
-        AutomationProperties.SetItemStatus(ArchivedToggle,
-            Text(_archived.IsExpanded ? "ArchivedExpanded" : "ArchivedCollapsed"));
-        var archived = connected && _archived.IsExpanded
-            ? WorkspaceProjection.ArchivedSessions(_archived.Sessions, _agentId)
-            : [];
-        ArchivedEmpty.Content = Text(_archived.IsUnavailable ? "ArchivedUnavailable" : "ArchivedEmpty");
-        ArchivedEmpty.Visibility = connected && _archived.IsExpanded && _archived.HasLoaded && archived.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        SyncSessionItems(_archivedSessionItems, archived, "WorkspaceArchivedSession", NavView.MenuItems.IndexOf(ArchivedEmpty) + 1);
         SessionsEmpty.Content = Text("NoSessions");
         SessionsEmpty.Visibility = sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NewAgentOption.IsEnabled = !_showingAgentCreation;
@@ -588,24 +569,10 @@ public sealed partial class WorkspaceWindow : WindowEx
             RefreshOwnerIdentity(e.PropertyName == nameof(AppState.SelfProfileRevision));
         if (e.PropertyName is nameof(AppState.AgentsList) or nameof(AppState.Sessions) or nameof(AppState.Status))
             RefreshSidebar();
-        if (e.PropertyName == nameof(AppState.Sessions) && _archived.IsExpanded)
-            _ = _archived.RefreshAsync(CurrentApp.GatewayClient);
-        if (e.PropertyName == nameof(AppState.Status) && _state.Status != ConnectionStatus.Connected)
-            _archived.Clear();
         if (e.PropertyName == nameof(AppState.Status) && _state.Status == ConnectionStatus.Connected)
-        {
             _ = RefreshAsync();
-            if (_archived.IsExpanded)
-                _ = _archived.RefreshAsync(CurrentApp.GatewayClient);
-        }
         if (e.PropertyName == nameof(AppState.Status))
             UpdateConnectionStatus(CurrentApp.ConnectionManager?.CurrentSnapshot, _state.Status);
-    }
-
-    private void OnToggleArchived(object sender, RoutedEventArgs e)
-    {
-        _archived.SetExpanded(!_archived.IsExpanded);
-        _ = _archived.RefreshAsync(CurrentApp.GatewayClient);
     }
 
     internal void UpdateConnectionStatus(GatewayConnectionSnapshot? snapshot, ConnectionStatus status)

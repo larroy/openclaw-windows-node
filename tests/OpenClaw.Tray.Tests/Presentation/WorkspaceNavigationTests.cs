@@ -861,24 +861,18 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public void Projection_ArchivedSessionsProjectArchivedRows()
+    public void Projection_ArchivedSessionsAreNotSidebarDestinations()
     {
         var sessions = new[]
         {
             new SessionInfo { Key = "agent:main:archived", UpdatedAt = new DateTime(2026, 3, 1), Archived = true, Unread = true, Pinned = true },
         };
 
-        var archived = WorkspaceProjection.ArchivedSessions(sessions, null);
-
-        var row = Assert.Single(archived);
-        Assert.Equal("agent:main:archived", row.Key);
-        Assert.True(row.IsArchived);
-        Assert.False(row.IsPinned);
-        Assert.False(row.IsUnread);
+        Assert.Empty(WorkspaceProjection.Sessions(sessions, null, new WorkspaceSessionOrder()));
     }
 
     [Fact]
-    public void Projection_WorkingStateFollowsActiveRunAndIsSuppressedForArchivedRows()
+    public void Projection_WorkingStateFollowsActiveRun()
     {
         var sessions = new[]
         {
@@ -893,10 +887,6 @@ public sealed class WorkspaceNavigationTests
         Assert.True(rows["agent:main:legacy"].IsWorking);
         Assert.False(rows["agent:main:stale"].IsWorking);
 
-        var archived = WorkspaceProjection.ArchivedSessions(
-            [new SessionInfo { Key = "agent:main:archived", Archived = true, HasActiveRun = true }], null);
-
-        Assert.False(Assert.Single(archived).IsWorking);
     }
 
     [Fact]

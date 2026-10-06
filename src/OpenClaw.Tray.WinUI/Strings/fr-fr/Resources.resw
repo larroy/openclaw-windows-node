@@ -7843,11 +7843,10 @@ Vos paramètres, votre passerelle, vos fichiers et vos modèles restent en place
   <data name="WorkspaceShell_SessionPinned" xml:space="preserve"><value>Pinned</value></data>
   <data name="WorkspaceShell_SessionUnread" xml:space="preserve"><value>Unread</value></data>
   <data name="WorkspaceShell_SessionWorking" xml:space="preserve"><value>Working</value></data>
-  <data name="WorkspaceShell_Archived" xml:space="preserve"><value>Archived</value></data>
-  <data name="WorkspaceShell_ArchivedExpanded" xml:space="preserve"><value>Expanded</value></data>
-  <data name="WorkspaceShell_ArchivedCollapsed" xml:space="preserve"><value>Collapsed</value></data>
-  <data name="WorkspaceShell_ArchivedEmpty" xml:space="preserve"><value>No archived sessions.</value></data>
-  <data name="WorkspaceShell_ArchivedUnavailable" xml:space="preserve"><value>Archived sessions are unavailable on this gateway.</value></data>
+  <data name="SessionsPage_Archived" xml:space="preserve"><value>Archivées</value></data>
+  <data name="SessionsPage_ArchivedEmpty" xml:space="preserve"><value>Aucune session archivée.</value></data>
+  <data name="SessionsPage_ArchivedUnavailable" xml:space="preserve"><value>Les sessions archivées ne sont pas disponibles sur cette passerelle.</value></data>
+  <data name="SessionsPage_Unarchive" xml:space="preserve"><value>Désarchiver la session</value></data>
   <data name="WorkspaceShell_SessionActionFailed" xml:space="preserve"><value>The gateway didn't accept the request. Try again.</value></data>
   <data name="WorkspaceShell_SessionConnectionChanged" xml:space="preserve"><value>The Gateway connection changed. Refresh sessions to check the outcome before trying again.</value></data>
   <data name="WorkspaceShell_SessionActionTimedOut" xml:space="preserve"><value>The Gateway did not respond in time. The outcome is unknown. Refresh the session before trying again.</value></data>
