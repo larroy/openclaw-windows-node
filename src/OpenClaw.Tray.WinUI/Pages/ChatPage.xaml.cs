@@ -43,10 +43,16 @@ public sealed partial class ChatPage : Page
     private bool _webViewMode;
     private bool _pageActive;
     private readonly SetupNativeChatBinding _nativeSetupBinding = new();
+    private readonly SetupNativeChatPresentation _nativeSetupPresentation = new();
+    private readonly SetupNativeChatRefresh _nativeSetupRefresh;
+    private SetupNativeChatWarning? _displayedNativeSetupWarning;
+    // Invalidates queued refreshes and async credential work on surface, binding, or lifetime changes.
+    private int _surfaceGeneration;
 
     protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
     {
         _nativeSetupBinding.Bind(e.Parameter as SetupNativeNavigationRequest);
+        SynchronizeNativeSetupBinding();
         base.OnNavigatedTo(e);
     }
 
@@ -59,20 +65,43 @@ public sealed partial class ChatPage : Page
     {
         request.GetConnectedClient(CurrentApp.Registry, CurrentApp.ConnectionManager);
         _nativeSetupBinding.Bind(request);
-        _sessionRemoved = false;
-        _pendingSessionKey = request.Completion.Target.SessionKey;
+        SynchronizeNativeSetupBinding();
         _pendingVoice.Cancel();
     }
 
-    internal void RetainNativeSetupForDestination(WorkspaceDestination destination) =>
+    internal void RetainNativeSetupForDestination(WorkspaceDestination destination)
+    {
         _nativeSetupBinding.RetainForDestination(destination);
+        SynchronizeNativeSetupBinding();
+    }
 
-    internal void InvalidateNativeSetupForNavigation() => _nativeSetupBinding.Invalidate();
+    internal void InvalidateNativeSetupForNavigation()
+    {
+        _nativeSetupBinding.Invalidate();
+        SynchronizeNativeSetupBinding();
+    }
+
+    private void SynchronizeNativeSetupBinding()
+    {
+        if (_nativeSetupPresentation.Bind(_nativeSetupBinding.Request))
+        {
+            _surfaceGeneration++;
+            _pendingSessionKey = null;
+            if (_nativeSetupBinding.Request is not null)
+                _sessionRemoved = false;
+            ApplyNativeSetupWarning(SetupNativeChatWarning.None, "binding change");
+        }
+        ReconcileNativeSetupObserver();
+    }
+
+    private void ReconcileNativeSetupObserver() =>
+        _nativeSetupRefresh.Reconcile(_pageActive, _nativeSetupBinding.Request,
+            (App.Current as App)?.ConnectionManager);
 
     internal async Task WaitForNativeSetupAsync(SetupNativeNavigationRequest request, CancellationToken ct)
     {
         _nativeSetupBinding.RequireCurrent(request, ct);
-        while (_reactorHost is null || !_pageActive || !IsLoaded)
+        while (_reactorHost is null || !_nativeSetupPresentation.IsReady || !_pageActive || !IsLoaded)
         {
             _nativeSetupBinding.RequireCurrent(request, ct);
             RequireNativeSetupOwner();
@@ -85,9 +114,6 @@ public sealed partial class ChatPage : Page
         ct.ThrowIfCancellationRequested();
     }
     private readonly SemaphoreSlim _speakerMuteGate = new(1, 1);
-    // Bumped by every surface apply and by unload; an in-flight WebView credential
-    // resolution applies only if its generation is still current.
-    private int _surfaceGeneration;
     // Serializes credential resolution across every ChatPage (Hub and Workspace each own one):
     // concurrent native-runtime Inspect calls deny each other (NativeGatewayRuntime.Inspect
     // uses _gate.Wait(0)).
@@ -105,14 +131,30 @@ public sealed partial class ChatPage : Page
     public ChatPage()
     {
         InitializeComponent();
+        _nativeSetupRefresh = new SetupNativeChatRefresh(
+            action => DispatcherQueue?.TryEnqueue(() => action()) == true,
+            () => (App.Current as App)?.ChatProvider,
+            (request, manager, source) =>
+            {
+                if (!_pageActive || !ReferenceEquals(request, _nativeSetupBinding.Request) ||
+                    !ReferenceEquals(manager, (App.Current as App)?.ConnectionManager))
+                {
+                    ReconcileNativeSetupObserver();
+                    return;
+                }
+                ApplyChatSurface(source);
+            },
+            outcome => Logger.Debug($"[SetupChat] {outcome}"));
         Unloaded += OnUnloaded;
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        _surfaceGeneration++;
         _pageActive = false;
+        _surfaceGeneration++;
+        ReconcileNativeSetupObserver();
         _pendingVoice.Cancel();
+        _reactorHost?.CancelVoiceRecording();
         UpdateNativeChatSurfaceActive();
 
         // Don't tear down the native chat host — preserve it across page
@@ -130,10 +172,11 @@ public sealed partial class ChatPage : Page
                 WebView.CoreWebView2.NavigationStarting -= _navStartingHandler;
         }
 
-        CurrentApp.SettingsChanged -= OnSettingsSaved;
-
         if (App.Current is App app)
+        {
+            app.SettingsChanged -= OnSettingsSaved;
             app.ChatProviderChanged -= OnAppChatProviderChanged;
+        }
 
         if (App.Current is App app2)
             app2.SpeakerMuteChanged -= OnSpeakerMuteChanged;
@@ -159,7 +202,9 @@ public sealed partial class ChatPage : Page
             _pendingVoice.Request(nativeSurface: !_webViewMode);
         }
         if (_reactorHost is { HasVoiceTrigger: true } host &&
-            _pendingVoice.TryConsume(_pageActive, composerReady: true))
+            _pendingVoice.TryConsume(_pageActive, composerReady:
+                ChatHost.Visibility == Visibility.Visible &&
+                (_nativeSetupBinding.Request is null || _nativeSetupPresentation.IsReady)))
             host.TriggerVoiceRecording();
     }
 
@@ -167,12 +212,12 @@ public sealed partial class ChatPage : Page
 
     internal void Initialize(Window? ownerWindow)
     {
+        if (!_pageActive) _surfaceGeneration++;
         _pageActive = true;
         _ownerWindow = ownerWindow;
         _hub = ownerWindow as HubWindow;
-        if (_nativeSetupBinding.Request is { } native)
+        if (_nativeSetupBinding.Request is not null)
         {
-            _pendingSessionKey = native.Completion.Target.SessionKey;
             if (_hub is not null)
                 _hub.PendingAutoStartVoice = false;
         }
@@ -205,9 +250,9 @@ public sealed partial class ChatPage : Page
         _hub = null;
     }
 
-    private void OnSettingsSaved(object? sender, EventArgs e) => ApplyChatSurface();
+    private void OnSettingsSaved(object? sender, EventArgs e) => QueueSurfaceRefresh("settings");
 
-    private void OnDebugOverrideChanged(object? sender, EventArgs e) => ApplyChatSurface();
+    private void OnDebugOverrideChanged(object? sender, EventArgs e) => QueueSurfaceRefresh("settings");
 
     private void OnSpeakerMuteChanged(bool muted)
     {
@@ -216,14 +261,24 @@ public sealed partial class ChatPage : Page
 
     private void OnAppChatProviderChanged(object? sender, EventArgs e)
     {
-        var dispatcher = DispatcherQueue;
-        if (dispatcher is null || dispatcher.HasThreadAccess)
-        {
-            ApplyChatSurface();
-            return;
-        }
+        QueueSurfaceRefresh("provider change");
+    }
 
-        _ = dispatcher.TryEnqueue(ApplyChatSurface);
+    private void QueueSurfaceRefresh(string source)
+    {
+        var generation = _surfaceGeneration;
+        var request = _nativeSetupBinding.Request;
+        if (DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (!_pageActive || generation != _surfaceGeneration ||
+                !ReferenceEquals(request, _nativeSetupBinding.Request)) return;
+            ReconcileNativeSetupObserver();
+            if (request is not null)
+                _nativeSetupRefresh.Request(source);
+            else
+                ApplyChatSurface(source);
+        }) != true)
+            Logger.Debug("[SetupChat] surface dispatch unavailable");
     }
 
     internal void SelectSession(string sessionKey)
@@ -240,6 +295,9 @@ public sealed partial class ChatPage : Page
 
     internal void QueueSession(string? sessionKey)
     {
+        if (!string.IsNullOrEmpty(sessionKey) && _nativeSetupBinding.Request is { } request &&
+            sessionKey != request.Completion.Target.SessionKey)
+            InvalidateNativeSetupForNavigation();
         _pendingSessionKey = sessionKey;
         if (!string.IsNullOrEmpty(sessionKey))
             _sessionRemoved = false;
@@ -255,7 +313,7 @@ public sealed partial class ChatPage : Page
             _hub.PendingChatSessionKey = null;
         if (CurrentApp.PendingChatSessionKey == key)
             CurrentApp.PendingChatSessionKey = null;
-        _nativeSetupBinding.Invalidate();
+        InvalidateNativeSetupForNavigation();
         _pendingVoice.Cancel();
         _navigationCts?.Cancel();
         _navigationStarted = false;
@@ -274,12 +332,23 @@ public sealed partial class ChatPage : Page
         RemovedSessionPlaceholder.Visibility = Visibility.Visible;
     }
 
+    internal void OnComposerSessionSelected(string sessionKey)
+    {
+        if (_nativeSetupBinding.Request is { } request &&
+            sessionKey != request.Completion.Target.SessionKey)
+            InvalidateNativeSetupForNavigation();
+        _mountedThreadId = sessionKey;
+    }
+
     private void OnWorkspaceOpenConnection(object sender, RoutedEventArgs e) =>
         ((IAppCommands)CurrentApp).Navigate("connection");
 
-    private void ApplyChatSurface()
+    private void ApplyChatSurface(string source = "binding")
     {
-        if (CurrentApp.Settings is not { } settings) return;
+        ReconcileNativeSetupObserver();
+        if (_nativeSetupBinding.Request is null)
+            ApplyNativeSetupWarning(SetupNativeChatWarning.None, source);
+        if (!_pageActive || CurrentApp.Settings is not { } settings) return;
         var generation = ++_surfaceGeneration;
         if (_sessionRemoved)
         {
@@ -287,23 +356,23 @@ public sealed partial class ChatPage : Page
             return;
         }
         RemovedSessionPlaceholder.Visibility = Visibility.Collapsed;
-        if (_nativeSetupBinding.Request is not null)
+        if (_nativeSetupBinding.Request is { } request)
         {
-            try
-            {
-                RequireNativeSetupOwner();
-                NativeSetupError.IsOpen = false;
-                NativeSetupError.Visibility = Visibility.Collapsed;
-                ShowReactorSurface();
-            }
-            catch (InvalidOperationException)
-            {
-                DisposeReactorHost();
-                ChatHost.Visibility = WebView.Visibility = PlaceholderPanel.Visibility = Visibility.Collapsed;
-                NativeSetupError.Message = LocalizationHelper.GetString("Onboarding_Ready_LaunchChanged");
-                NativeSetupError.Visibility = Visibility.Visible;
-                NativeSetupError.IsOpen = true;
-            }
+            _nativeSetupPresentation.Evaluate(
+                () => request.GetConnectedClient(CurrentApp.Registry, CurrentApp.ConnectionManager),
+                client => _nativeSetupRefresh.IsProviderCurrent(client, CurrentApp.ChatProvider),
+                target =>
+                {
+                    if (target is not null) _pendingSessionKey = target;
+                    ShowReactorSurface();
+                    return _reactorHost is not null &&
+                        _mountedThreadId == request.Completion.Target.SessionKey;
+                },
+                BlockNativeSetupChat,
+                DeferNativeSetupChat);
+            ApplyNativeSetupWarning(_nativeSetupPresentation.Warning, source);
+            UpdateNativeChatSurfaceActive();
+            ConsumePendingVoice();
             return;
         }
 
@@ -311,6 +380,62 @@ public sealed partial class ChatPage : Page
             _ = ApplyWebViewSurfaceAsync(settings, generation);
         else
             ShowReactorSurface();
+    }
+
+    private void BlockNativeSetupChat()
+    {
+        if (_reactorHost is not null) DisposeReactorHost();
+        HideNativeSetupChat();
+    }
+
+    private void DeferNativeSetupChat()
+    {
+        _reactorHost?.CancelVoiceRecording();
+        HideNativeSetupChat();
+        if (_nativeSetupPresentation.Warning == SetupNativeChatWarning.None)
+            WaitingPanel.Visibility = Visibility.Visible;
+    }
+
+    private void HideNativeSetupChat()
+    {
+        StopWebViewNavigation();
+        ChatHost.Visibility = WebView.Visibility = PlaceholderPanel.Visibility = Visibility.Collapsed;
+        WaitingPanel.Visibility = ErrorPanel.Visibility = LoadingRing.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
+        UpdateNativeChatSurfaceActive();
+    }
+
+    internal void ApplyNativeSetupWarning(SetupNativeChatWarning warning, string source)
+    {
+        if (_displayedNativeSetupWarning == warning) return;
+        var hadWarning = _displayedNativeSetupWarning is not null and not SetupNativeChatWarning.None;
+        _displayedNativeSetupWarning = warning;
+        var key = warning switch
+        {
+            SetupNativeChatWarning.Unavailable => "ChatPage_SetupUnavailable",
+            SetupNativeChatWarning.AuthorityUnconfirmed => "ChatPage_SetupAuthorityUnconfirmed",
+            SetupNativeChatWarning.RenderingFailed => "ChatPage_SetupRenderingFailed",
+            _ => null,
+        };
+        NativeSetupError.Severity = warning == SetupNativeChatWarning.Unavailable
+            ? InfoBarSeverity.Warning : InfoBarSeverity.Error;
+        NativeSetupError.Message = key is null ? string.Empty : LocalizationHelper.GetString(key);
+        NativeSetupCheckAgain.IsEnabled = key is not null;
+        NativeSetupError.Visibility = key is null ? Visibility.Collapsed : Visibility.Visible;
+        NativeSetupError.IsOpen = key is not null;
+        if (key is not null || hadWarning)
+            Logger.Info($"[SetupChat] {source}: " +
+                (key is null ? (_nativeSetupBinding.Request is null ? "binding cleared" : "recovered") : warning.ToString()));
+    }
+
+    private void OnNativeSetupCheckAgain(object sender, RoutedEventArgs e)
+    {
+        if (!_pageActive || _nativeSetupBinding.Request is null) return;
+        var restoreFocus = NativeSetupCheckAgain.FocusState != FocusState.Unfocused;
+        ApplyChatSurface("explicit recheck");
+        if (restoreFocus && !NativeSetupError.IsOpen &&
+            Microsoft.UI.Xaml.Input.FocusManager.FindFirstFocusableElement(ChatHost) is Control control)
+            control.Focus(FocusState.Programmatic);
     }
 
     private static InteractiveGatewayCredential? ResolveChatCredential(
@@ -336,6 +461,7 @@ public sealed partial class ChatPage : Page
         // Hide WebView2-specific UI; mount the Reactor host (idempotent).
         _webViewMode = false;
         StopWebViewNavigation();
+        WaitingPanel.Visibility = Visibility.Collapsed;
         WebView.Visibility = Visibility.Collapsed;
         LoadingRing.IsActive = false;
         LoadingRing.Visibility = Visibility.Collapsed;
@@ -410,6 +536,7 @@ public sealed partial class ChatPage : Page
 
         PlaceholderPanel.Visibility = Visibility.Collapsed;
         ChatHost.Visibility = Visibility.Visible;
+        MountedReactorChat? mountedHost = null;
         var composerSession = ReactorChatHostExtensions.CreateComposerSession(
             ChatHost,
             composerFactory,
@@ -418,16 +545,35 @@ public sealed partial class ChatPage : Page
             onAttachClick: OnAttachClicked,
             onSettingsClick: NavigateToVoiceSettings,
             onSpeakerMuteChanged: muted => _ = OnSpeakerMuteChangedAsync(muted),
-            initialMuted: ShouldStartSpeakerMuted(CurrentApp.Settings));
-        _reactorHost = (_ownerWindow ?? throw new InvalidOperationException("Chat requires an owning window.")).MountReactorChat(
-            ChatHost,
-            provider,
-            composerSession,
-            initialThreadId: threadIdToMount,
-            onReadAloud: readAloud,
-            onStopSpeaking: () => app?.StopChatSpeaking(),
-            onOpenCheckpoints: OpenSessionCheckpoints,
-            showSessionPicker: _ownerWindow is not WorkspaceWindow);
+            initialMuted: ShouldStartSpeakerMuted(CurrentApp.Settings),
+            onSessionNavigationStarting: () =>
+            {
+                if (_pageActive && ReferenceEquals(_reactorHost, mountedHost))
+                    InvalidateNativeSetupForNavigation();
+            },
+            onSessionSelected: sessionKey =>
+            {
+                if (ReferenceEquals(_reactorHost, mountedHost))
+                    OnComposerSessionSelected(sessionKey);
+            });
+        try
+        {
+            mountedHost = (_ownerWindow ?? throw new InvalidOperationException("Chat requires an owning window.")).MountReactorChat(
+                ChatHost,
+                provider,
+                composerSession,
+                initialThreadId: threadIdToMount,
+                onReadAloud: readAloud,
+                onStopSpeaking: () => app?.StopChatSpeaking(),
+                onOpenCheckpoints: OpenSessionCheckpoints,
+                showSessionPicker: _ownerWindow is not WorkspaceWindow);
+            _reactorHost = mountedHost;
+        }
+        catch (InvalidOperationException)
+        {
+            composerSession.Dispose();
+            throw;
+        }
         _mountedProvider = provider;
         _mountedThreadId = threadIdToMount;
         UpdateNativeChatSurfaceActive();
@@ -809,7 +955,8 @@ public sealed partial class ChatPage : Page
     private void UpdateNativeChatSurfaceActive()
     {
         if (App.Current is App app)
-            app.SetHubNativeChatSurfaceActive(_pageActive && !_webViewMode && _reactorHost is not null);
+            app.SetHubNativeChatSurfaceActive(_pageActive && !_webViewMode && _reactorHost is not null &&
+                (_nativeSetupBinding.Request is null || _nativeSetupPresentation.IsReady));
     }
 
     private async Task InitializeWebViewAsync(InteractiveGatewayCredential credential, int generation)
