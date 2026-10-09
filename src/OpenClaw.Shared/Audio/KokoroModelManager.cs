@@ -115,6 +115,10 @@ public sealed class KokoroModelManager
         return null;
     }
 
+    /// <summary>Catalog voice for <paramref name="voiceId"/>, or null for blank or unknown ids.</summary>
+    public static KokoroVoiceInfo? FindVoice(string? voiceId) =>
+        FindPackForVoice(voiceId)?.Voices.First(v => string.Equals(v.VoiceId, voiceId, StringComparison.Ordinal));
+
     /// <summary>Catalog entry for <paramref name="packId"/>; throws for unknown ids.</summary>
     public static KokoroModelPackInfo GetPack(string packId)
     {
