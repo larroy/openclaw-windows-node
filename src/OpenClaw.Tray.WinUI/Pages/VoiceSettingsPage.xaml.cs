@@ -673,6 +673,9 @@ public sealed partial class VoiceSettingsPage : Page
         catch (Exception ex) { Logger.Debug($"VoiceSettingsPage: cancel prior Kokoro download failed: {ex.Message}"); }
         _kokoroDownloadCts = new CancellationTokenSource();
         var ct = _kokoroDownloadCts.Token;
+        // The download controls are shared by every voice; lock the voice picker so they keep
+        // describing the pack being downloaded until this operation finishes.
+        KokoroVoiceCombo.IsEnabled = false;
         KokoroDownloadButton.IsEnabled = false;
         KokoroDownloadButtonText.Text = L("VoiceSettingsPage_KokoroButtonDownloading");
         KokoroDownloadProgress.IsIndeterminate = false;
@@ -680,12 +683,15 @@ public sealed partial class VoiceSettingsPage : Page
         KokoroDownloadProgress.Value = 0;
         KokoroStatusText.Text = L("VoiceSettingsPage_KokoroConnecting");
 
+        var active = true;
         try
         {
             var models = new KokoroModelManager(SettingsManager.SettingsDirectoryPath, new AppLogger());
             DateTime lastReportUtc = DateTime.MinValue;
             var progress = new Progress<(long downloaded, long total)>(p =>
             {
+                // Progress<T> posts asynchronously; drop reports that arrive after completion.
+                if (!active) return;
                 var now = DateTime.UtcNow;
                 if (p.downloaded < p.total && now - lastReportUtc < TimeSpan.FromMilliseconds(150)) return;
                 lastReportUtc = now;
@@ -696,7 +702,7 @@ public sealed partial class VoiceSettingsPage : Page
             await models.DownloadPackAsync(pack.PackId, progress, ct);
             UpdateKokoroVoiceState();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             UpdateKokoroVoiceState();
             KokoroStatusText.Text = L("VoiceSettingsPage_KokoroDownloadCanceled");
@@ -704,13 +710,27 @@ public sealed partial class VoiceSettingsPage : Page
         catch (Exception ex)
         {
             Logger.Error($"Kokoro voice pack download failed: {ex}");
-            KokoroStatusText.Text = L("VoiceSettingsPage_KokoroDownloadFailed");
+            KokoroStatusText.Text = KokoroDownloadFailureText(VoicePackDownloadFailure.Classify(ex), pack);
             KokoroDownloadButton.IsEnabled = true;
             KokoroDownloadButtonText.Text = L("VoiceSettingsPage_KokoroButtonRetry");
             KokoroDownloadProgress.Visibility = Visibility.Collapsed;
             UpdateCapabilityState();
         }
+        finally
+        {
+            active = false;
+            KokoroVoiceCombo.IsEnabled = true;
+        }
     }
+
+    private static string KokoroDownloadFailureText(VoicePackDownloadFailureKind kind, KokoroModelPackInfo pack) => kind switch
+    {
+        VoicePackDownloadFailureKind.DiskFull =>
+            Lf("VoiceSettingsPage_KokoroDownloadFailedDiskFull", $"{pack.TotalSizeBytes / (1024d * 1024d):F0}"),
+        VoicePackDownloadFailureKind.Network => L("VoiceSettingsPage_KokoroDownloadFailedNetwork"),
+        VoicePackDownloadFailureKind.Integrity => L("VoiceSettingsPage_KokoroDownloadFailedIntegrity"),
+        _ => L("VoiceSettingsPage_KokoroDownloadFailed"),
+    };
 
     private void OnKokoroDeleteClick(object sender, RoutedEventArgs e) =>
         AsyncEventHandlerGuard.Run(OnKokoroDeleteClickAsync, new OpenClawTray.AppLogger(), nameof(OnKokoroDeleteClick));
