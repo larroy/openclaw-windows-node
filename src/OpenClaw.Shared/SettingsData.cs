@@ -111,7 +111,13 @@ public record class SettingsData
     /// provider (which is unaffected by this setting).
     /// </summary>
     public bool NodeOllamaInferenceEnabled { get; set; } = false;
-    public string TtsProvider { get; set; } = OpenClaw.Shared.Capabilities.TtsCapability.KokoroProvider;
+    /// <summary>
+    /// Provider a settings file resolves to when it omits or blanks <see cref="TtsProvider"/>.
+    /// Stays Piper (the default before Kokoro) so upgrades keep their speech path; fresh installs
+    /// get Kokoro from the tray's default settings instead.
+    /// </summary>
+    public const string LegacyDefaultTtsProvider = OpenClaw.Shared.Capabilities.TtsCapability.PiperProvider;
+    public string TtsProvider { get; set; } = LegacyDefaultTtsProvider;
     /// <summary>Persisted: whether the Hub's NavigationView pane is expanded
     /// (true) or collapsed/compact (false). Default true.</summary>
     public bool HubNavPaneOpen { get; set; } = true;

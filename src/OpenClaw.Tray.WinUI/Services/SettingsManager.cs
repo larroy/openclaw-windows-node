@@ -359,7 +359,7 @@ public class SettingsManager
             SttLanguage = string.IsNullOrWhiteSpace(loaded.SttLanguage) ? defaults.SttLanguage : loaded.SttLanguage,
             SttModelName = string.IsNullOrWhiteSpace(loaded.SttModelName) ? defaults.SttModelName : loaded.SttModelName,
             SttSilenceTimeout = loaded.SttSilenceTimeout > 0 ? loaded.SttSilenceTimeout : defaults.SttSilenceTimeout,
-            TtsProvider = string.IsNullOrWhiteSpace(loaded.TtsProvider) ? defaults.TtsProvider : loaded.TtsProvider,
+            TtsProvider = string.IsNullOrWhiteSpace(loaded.TtsProvider) ? SettingsData.LegacyDefaultTtsProvider : loaded.TtsProvider,
             TtsElevenLabsApiKey = UnprotectSettingSecret(loaded.TtsElevenLabsApiKey) ?? defaults.TtsElevenLabsApiKey,
             TtsElevenLabsModel = loaded.TtsElevenLabsModel ?? defaults.TtsElevenLabsModel,
             TtsElevenLabsVoiceId = loaded.TtsElevenLabsVoiceId ?? defaults.TtsElevenLabsVoiceId,

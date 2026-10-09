@@ -2689,6 +2689,15 @@ Use uma destas opções:
   <data name="VoiceSettingsPage_KokoroDownloadFailed" xml:space="preserve">
     <value>Falha no download (veja o log de depuração).</value>
   </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedDiskFull" xml:space="preserve">
+    <value>Espaço em disco insuficiente. Libere pelo menos {0} MB e tente novamente.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedNetwork" xml:space="preserve">
+    <value>Falha no download. Verifique sua conexão com a internet e tente novamente.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedIntegrity" xml:space="preserve">
+    <value>O pacote de voz baixado não passou na verificação e foi removido. Tente novamente mais tarde.</value>
+  </data>
   <data name="VoiceSettingsPage_KokoroDeleted" xml:space="preserve">
     <value>Pacote de voz excluído.</value>
   </data>

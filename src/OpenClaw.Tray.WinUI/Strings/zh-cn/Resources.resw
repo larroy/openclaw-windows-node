@@ -2646,6 +2646,15 @@
   <data name="VoiceSettingsPage_KokoroDownloadFailed" xml:space="preserve">
     <value>下载失败（参见 Debug 日志）。</value>
   </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedDiskFull" xml:space="preserve">
+    <value>磁盘空间不足。请至少释放 {0} MB 后重试。</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedNetwork" xml:space="preserve">
+    <value>下载失败。请检查网络连接后重试。</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedIntegrity" xml:space="preserve">
+    <value>下载的语音包未通过验证，已被删除。请稍后重试。</value>
+  </data>
   <data name="VoiceSettingsPage_KokoroDeleted" xml:space="preserve">
     <value>语音包已删除。</value>
   </data>

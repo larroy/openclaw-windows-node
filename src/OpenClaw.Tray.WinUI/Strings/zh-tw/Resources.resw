@@ -2646,6 +2646,15 @@
   <data name="VoiceSettingsPage_KokoroDownloadFailed" xml:space="preserve">
     <value>下載失敗（參見 Debug 日誌）。</value>
   </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedDiskFull" xml:space="preserve">
+    <value>磁碟空間不足。請至少釋放 {0} MB 後再試一次。</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedNetwork" xml:space="preserve">
+    <value>下載失敗。請檢查網路連線後再試一次。</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedIntegrity" xml:space="preserve">
+    <value>下載的語音套件未通過驗證，已被刪除。請稍後再試。</value>
+  </data>
   <data name="VoiceSettingsPage_KokoroDeleted" xml:space="preserve">
     <value>語音套件已刪除。</value>
   </data>

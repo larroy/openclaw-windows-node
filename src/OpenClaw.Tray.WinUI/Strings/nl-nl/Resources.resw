@@ -2647,6 +2647,15 @@ Gebruik een van deze opties:
   <data name="VoiceSettingsPage_KokoroDownloadFailed" xml:space="preserve">
     <value>Download mislukt (zie Debug-log).</value>
   </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedDiskFull" xml:space="preserve">
+    <value>Onvoldoende schijfruimte. Maak minstens {0} MB vrij en probeer het opnieuw.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedNetwork" xml:space="preserve">
+    <value>Download mislukt. Controleer uw internetverbinding en probeer het opnieuw.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedIntegrity" xml:space="preserve">
+    <value>Het gedownloade stempakket is niet geverifieerd en is verwijderd. Probeer het later opnieuw.</value>
+  </data>
   <data name="VoiceSettingsPage_KokoroDeleted" xml:space="preserve">
     <value>Stempakket verwijderd.</value>
   </data>

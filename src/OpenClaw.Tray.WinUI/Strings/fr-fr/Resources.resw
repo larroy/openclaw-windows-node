@@ -2646,6 +2646,15 @@ Utilisez l'une de ces options :
   <data name="VoiceSettingsPage_KokoroDownloadFailed" xml:space="preserve">
     <value>Échec du téléchargement (voir le journal Debug).</value>
   </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedDiskFull" xml:space="preserve">
+    <value>Espace disque insuffisant. Libérez au moins {0} Mo et réessayez.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedNetwork" xml:space="preserve">
+    <value>Échec du téléchargement. Vérifiez votre connexion Internet et réessayez.</value>
+  </data>
+  <data name="VoiceSettingsPage_KokoroDownloadFailedIntegrity" xml:space="preserve">
+    <value>Le pack vocal téléchargé n'a pas passé la vérification et a été supprimé. Réessayez plus tard.</value>
+  </data>
   <data name="VoiceSettingsPage_KokoroDeleted" xml:space="preserve">
     <value>Pack vocal supprimé.</value>
   </data>

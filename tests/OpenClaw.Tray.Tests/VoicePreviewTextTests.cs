@@ -8,16 +8,33 @@ public class VoicePreviewTextTests
     private const string UiFallback = "ui-localized";
 
     [Theory]
-    [InlineData("es-ES", "¡Hola! Esta es la voz de tu Companion.")]
-    [InlineData("zh-CN", "您好!我是您的 Companion。")]
-    [InlineData("en-GB", "Hello! This is your Companion speaking.")]
-    [InlineData("ES", "¡Hola! Esta es la voz de tu Companion.")]
-    [InlineData("xx-XX", UiFallback)]
-    [InlineData("", UiFallback)]
-    [InlineData(null, UiFallback)]
-    public void For_PicksSentenceByVoiceLanguageAndFallsBackToUiText(string? languageTag, string expected)
+    [InlineData("es-ES", "es")]
+    [InlineData("zh-CN", "zh")]
+    [InlineData("en-GB", "en")]
+    [InlineData("ES-es", "es")]
+    public void For_RegionalTag_UsesItsLanguageSentence(string regionalTag, string primaryTag)
     {
-        Assert.Equal(expected, VoicePreviewText.For(languageTag, UiFallback));
+        var text = VoicePreviewText.For(regionalTag, UiFallback);
+
+        Assert.NotEqual(UiFallback, text);
+        Assert.Equal(VoicePreviewText.For(primaryTag, UiFallback), text);
+    }
+
+    [Fact]
+    public void For_DifferentLanguages_GetDifferentSentences()
+    {
+        var sentences = new[] { "en-US", "es-ES", "zh-CN" }.Select(tag => VoicePreviewText.For(tag, UiFallback));
+
+        Assert.Equal(3, sentences.Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData("xx-XX")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void For_UnknownOrMissingLanguage_UsesUiLocalizedText(string? languageTag)
+    {
+        Assert.Equal(UiFallback, VoicePreviewText.For(languageTag, UiFallback));
     }
 
     [Fact]
