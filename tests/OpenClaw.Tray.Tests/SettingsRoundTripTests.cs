@@ -58,6 +58,7 @@ public class SettingsRoundTripTests
             TtsWindowsVoiceId = "Microsoft Zira Desktop",
             HubNavPaneOpen = false,
             TtsPiperVoiceId = "fr_FR-siwis-low",
+            TtsKokoroVoiceId = "ef_dora",
             HasSeenActivityStreamTip = true,
             SkippedUpdateTag = "v1.2.3",
             NotifyChatResponses = false,
@@ -129,6 +130,7 @@ public class SettingsRoundTripTests
         Assert.Equal(original.TtsWindowsVoiceId, restored.TtsWindowsVoiceId);
         Assert.Equal(original.HubNavPaneOpen, restored.HubNavPaneOpen);
         Assert.Equal(original.TtsPiperVoiceId, restored.TtsPiperVoiceId);
+        Assert.Equal(original.TtsKokoroVoiceId, restored.TtsKokoroVoiceId);
         Assert.Equal(original.HasSeenActivityStreamTip, restored.HasSeenActivityStreamTip);
         Assert.Equal(original.SkippedUpdateTag, restored.SkippedUpdateTag);
         Assert.Equal(original.NotifyChatResponses, restored.NotifyChatResponses);
@@ -202,7 +204,7 @@ public class SettingsRoundTripTests
         Assert.Equal("auto", settings.SttLanguage);
         Assert.False(settings.VoiceTtsEnabled);
         Assert.False(settings.NodeTtsEnabled);
-        Assert.Equal("piper", settings.TtsProvider);
+        Assert.Equal("kokoro", settings.TtsProvider);
         Assert.Null(settings.TtsElevenLabsApiKey);
         Assert.Null(settings.TtsElevenLabsModel);
         Assert.Null(settings.TtsElevenLabsVoiceId);
@@ -452,7 +454,7 @@ public class SettingsRoundTripTests
         Assert.False(settings.NodeSttEnabled);
         Assert.Equal("auto", settings.SttLanguage);
         Assert.False(settings.NodeTtsEnabled);
-        Assert.Equal("piper", settings.TtsProvider);
+        Assert.Equal("kokoro", settings.TtsProvider);
         Assert.Null(settings.TtsElevenLabsApiKey);
         Assert.Null(settings.TtsElevenLabsModel);
         Assert.Null(settings.TtsElevenLabsVoiceId);
