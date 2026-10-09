@@ -24,6 +24,8 @@ public sealed partial class VoiceSettingsPage : Page
     private static string L(string key) => LocalizationHelper.GetString(key);
     private static string Lf(string key, params object?[] args) =>
         string.Format(CultureInfo.CurrentCulture, LocalizationHelper.GetString(key), args);
+    private static string PreviewTextFor(string? voiceLanguageTag) =>
+        VoicePreviewText.For(voiceLanguageTag, L("VoiceSettingsPage_CompanionPreviewText"));
 
     private CancellationTokenSource? _whisperDownloadCts;
     private CancellationTokenSource? _piperDownloadCts;
@@ -749,7 +751,7 @@ public sealed partial class VoiceSettingsPage : Page
             using var tts = new TextToSpeechService(new AppLogger(), CurrentApp.Settings);
             await tts.SpeakAsync(new TtsSpeakArgs
             {
-                Text = L("VoiceSettingsPage_CompanionPreviewText"),
+                Text = PreviewTextFor(KokoroModelManager.FindVoice(voiceId)?.LanguageTag),
                 Provider = TtsCapability.KokoroProvider,
                 VoiceId = voiceId,
                 Interrupt = true
@@ -954,7 +956,8 @@ public sealed partial class VoiceSettingsPage : Page
             using var tts = new TextToSpeechService(new AppLogger(), CurrentApp.Settings);
             await tts.SpeakAsync(new OpenClaw.Shared.Capabilities.TtsSpeakArgs
             {
-                Text = L("VoiceSettingsPage_CompanionPreviewText"),
+                Text = PreviewTextFor(PiperVoiceManager.AvailableVoices.FirstOrDefault(
+                    v => string.Equals(v.VoiceId, voiceId, StringComparison.OrdinalIgnoreCase))?.LanguageTag),
                 Provider = OpenClaw.Shared.Capabilities.TtsCapability.PiperProvider,
                 VoiceId = voiceId,
                 Interrupt = true

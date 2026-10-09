@@ -18,6 +18,17 @@ public sealed class KokoroModelManagerTests
         Assert.Equal(expectedPackId, KokoroModelManager.FindPackForVoice(voiceId)?.PackId);
     }
 
+    [Theory]
+    [InlineData("af_maple", "en-US")]
+    [InlineData("zm_100", "zh-CN")]
+    [InlineData("ef_dora", "es-ES")]
+    [InlineData("AF_MAPLE", null)]
+    [InlineData(null, null)]
+    public void FindVoice_ReturnsCatalogVoiceLanguage(string? voiceId, string? expectedLanguageTag)
+    {
+        Assert.Equal(expectedLanguageTag, KokoroModelManager.FindVoice(voiceId)?.LanguageTag);
+    }
+
     [Fact]
     public void VoiceIds_AreUniqueAcrossPacks()
     {
