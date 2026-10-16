@@ -41,12 +41,17 @@ public class NemotronBoltSetupAdmissionTests
     }
 
     [Theory]
-    [InlineData(262144, 131072, StepOutcome.FailedTerminal, false)]
-    [InlineData(131072, 262144, StepOutcome.Success, false)]
-    [InlineData(262144, 131072, StepOutcome.FailedTerminal, true)]
-    [InlineData(131072, 262144, StepOutcome.Success, true)]
+    [InlineData(262144, 131072, StepOutcome.FailedTerminal, false, true)]
+    [InlineData(131072, 262144, StepOutcome.Success, false, true)]
+    [InlineData(262144, 131072, StepOutcome.FailedTerminal, true, true)]
+    [InlineData(131072, 262144, StepOutcome.Success, true, true)]
+    [InlineData(262144, 131072, StepOutcome.FailedTerminal, false, false)]
+    [InlineData(131072, 262144, StepOutcome.Success, false, false)]
+    [InlineData(262144, 131072, StepOutcome.FailedTerminal, true, false)]
+    [InlineData(131072, 262144, StepOutcome.Success, true, false)]
+    [InlineData(262144, 262144, StepOutcome.Success, true, false)]
     public async Task InstalledReceipt_KeepsItsProfileAcrossMemoryChanges(int installedContext,
-        int fittingContext, StepOutcome expected, bool prerelease)
+        int fittingContext, StepOutcome expected, bool prerelease, bool withUiReceiptMarker)
     {
         using var temp = new TempDirectory();
         using var logger = new SetupLogger(filePath: null, LogLevel.Trace);
@@ -94,7 +99,8 @@ public class NemotronBoltSetupAdmissionTests
         var config = new SetupConfig();
         config.LocalAi.Enabled = true;
         config.LocalAi.SelectedModelId = model.Id;
-        config.LocalAi.InstalledReceiptModelId = model.Id;
+        if (withUiReceiptMarker)
+            config.LocalAi.InstalledReceiptModelId = model.Id;
         config.LocalAi.SelectedProfileId = profile.Id;
         var context = new SetupContext(config, logger, new TransactionJournal(filePath: null),
             new CommandRunner(logger), CancellationToken.None, temp.Path, temp.Path);
