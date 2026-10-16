@@ -3138,7 +3138,7 @@ Use uma destas opções:
     <value>Raciocínio</value>
   </data>
   <data name="Chat_Throughput_Tooltip" xml:space="preserve">
-    <value>Tokens por segundo: última resposta, média (μ) e percentil 95 (p95) das respostas recentes nesta sessão. ~ indica uma estimativa ao vivo durante a transmissão.</value>
+    <value>Tokens por segundo: última resposta do modelo, média (μ) e percentil 95 (p95) das chamadas de modelo recentes nesta sessão. ~ indica uma estimativa ao vivo durante a transmissão.</value>
   </data>
   <data name="Chat_ContextUsage_Tooltip" xml:space="preserve">
     <value>Uso da janela de contexto</value>

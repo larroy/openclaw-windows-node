@@ -94,6 +94,7 @@ public class ChatThroughputTrackerTests
     [Fact]
     public void RunUsage_RecordsEachModelCallFromCumulativeTotals_AndFinalDoesNotDoubleCount()
     {
+        _tracker.StartRun("main");
         _tracker.ObserveText("main", 10);
         _clock.Advance(TimeSpan.FromSeconds(2));
         Assert.True(_tracker.ObserveRunUsage("main", 100));
@@ -115,6 +116,7 @@ public class ChatThroughputTrackerTests
     [Fact]
     public void StartRun_ResetsCumulativeBaselineAndFinalFallback()
     {
+        _tracker.StartRun("main");
         _tracker.ObserveText("main", 10);
         _clock.Advance(TimeSpan.FromSeconds(1));
         _tracker.ObserveRunUsage("main", 100);
@@ -145,6 +147,59 @@ public class ChatThroughputTrackerTests
         _tracker.ObserveRunUsage("main", 10);
 
         Assert.Equal(["main", "main"], changed);
+    }
+
+    [Fact]
+    public void RunUsageWithoutObservedStart_AdoptsBaselineInsteadOfRecordingRunTotal()
+    {
+        // Provider created mid-run: the first total spans calls we never timed.
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.False(_tracker.ObserveRunUsage("main", 500));
+
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(_tracker.ObserveRunUsage("main", 560));
+
+        Assert.Equal(1, _tracker.Get("main").SampleCount);
+        Assert.Equal(60d, _tracker.Get("main").LatestTokensPerSecond);
+    }
+
+    [Fact]
+    public void EndRun_MakesNextUnstartedRunBaselineUnknown()
+    {
+        _tracker.StartRun("main");
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(_tracker.ObserveRunUsage("main", 100));
+        _tracker.EndRun("main");
+
+        // Next run's start was missed (e.g. buffered); its total is larger than the stale baseline.
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.False(_tracker.ObserveRunUsage("main", 150));
+        Assert.Equal(1, _tracker.Get("main").SampleCount);
+    }
+
+    [Fact]
+    public void EndRun_ClosesUsageRunSegmentButKeepsFallbackSegmentForFinalMessage()
+    {
+        _tracker.StartRun("main");
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _tracker.EndRun("main");
+        Assert.True(_tracker.CompleteAssistant("main", 40));
+
+        _tracker.StartRun("main");
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _tracker.ObserveRunUsage("main", 10);
+        _tracker.ObserveText("main", 400);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        _tracker.ObserveText("main", 400);
+        Assert.NotNull(_tracker.Get("main").LiveTokensPerSecond);
+        _tracker.EndRun("main");
+        Assert.Null(_tracker.Get("main").LiveTokensPerSecond);
     }
 
     [Fact]

@@ -34,16 +34,38 @@ internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
     /// <summary>Raised with the thread id after a change that can alter <see cref="Get"/>; outside the lock.</summary>
     public event Action<string>? Changed;
 
-    /// <summary>Starts a run: closes any open segment and resets the run's cumulative token baseline.</summary>
+    /// <summary>
+    /// Starts a run: closes any open segment and resets the run's cumulative token baseline to a
+    /// known zero, so the first <c>usage</c> total of this run is attributable to its first call.
+    /// </summary>
     public void StartRun(string threadId)
+    {
+        lock (_gate)
+        {
+            var state = GetOrCreateLocked(threadId);
+            state.ClearSegment();
+            state.RunOutputTokens = 0;
+            state.RunBaselineKnown = true;
+            state.RunReportsUsage = false;
+        }
+        Changed?.Invoke(threadId);
+    }
+
+    /// <summary>
+    /// Ends a run (lifecycle end/error). The baseline becomes unknown so a later run whose start is
+    /// missed cannot attribute its cumulative total to one call. A segment is closed only when the
+    /// run reported usage; otherwise it stays open for the final-message fallback, which the gateway
+    /// sends after lifecycle end.
+    /// </summary>
+    public void EndRun(string threadId)
     {
         lock (_gate)
         {
             if (!_threads.TryGetValue(threadId, out var state))
                 return;
-            state.ClearSegment();
-            state.RunOutputTokens = 0;
-            state.RunReportsUsage = false;
+            state.RunBaselineKnown = false;
+            if (state.RunReportsUsage)
+                state.ClearSegment();
         }
         Changed?.Invoke(threadId);
     }
@@ -53,8 +75,7 @@ internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
     {
         lock (_gate)
         {
-            if (!_threads.TryGetValue(threadId, out var state))
-                _threads[threadId] = state = new ThreadState();
+            var state = GetOrCreateLocked(threadId);
 
             var now = timeProvider.GetTimestamp();
             if (state.SegmentStart is null)
@@ -90,19 +111,33 @@ internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
         bool recorded;
         lock (_gate)
         {
-            if (!_threads.TryGetValue(threadId, out var state))
-                _threads[threadId] = state = new ThreadState();
-
-            // A smaller total means a new run generation whose start we did not observe.
-            var callTokens = runOutputTokens >= state.RunOutputTokens
-                ? runOutputTokens - state.RunOutputTokens
-                : runOutputTokens;
-            state.RunOutputTokens = runOutputTokens;
+            var state = GetOrCreateLocked(threadId);
             state.RunReportsUsage = true;
-            recorded = RecordSegmentLocked(state, callTokens);
+            if (!state.RunBaselineKnown || runOutputTokens < state.RunOutputTokens)
+            {
+                // Run start missed (provider created mid-run) or a new generation we did not see
+                // start: the total spans unknown calls, so only adopt it as the baseline.
+                state.RunOutputTokens = runOutputTokens;
+                state.RunBaselineKnown = true;
+                state.ClearSegment();
+                recorded = false;
+            }
+            else
+            {
+                var callTokens = runOutputTokens - state.RunOutputTokens;
+                state.RunOutputTokens = runOutputTokens;
+                recorded = RecordSegmentLocked(state, callTokens);
+            }
         }
         Changed?.Invoke(threadId);
         return recorded;
+    }
+
+    private ThreadState GetOrCreateLocked(string threadId)
+    {
+        if (!_threads.TryGetValue(threadId, out var state))
+            _threads[threadId] = state = new ThreadState();
+        return state;
     }
 
     /// <summary>
@@ -177,6 +212,7 @@ internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
         public long Characters;
         public long RunOutputTokens;
         public bool RunReportsUsage;
+        public bool RunBaselineKnown;
         public readonly Queue<double> Samples = new();
 
         public void ClearSegment()

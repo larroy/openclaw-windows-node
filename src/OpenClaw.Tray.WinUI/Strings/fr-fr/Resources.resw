@@ -3119,7 +3119,7 @@ Utilisez l'une de ces options :
     <value>Raisonnement</value>
   </data>
   <data name="Chat_Throughput_Tooltip" xml:space="preserve">
-    <value>Jetons par seconde : dernière réponse, moyenne (μ) et 95e centile (p95) des réponses récentes de cette session. ~ indique une estimation en direct pendant la diffusion.</value>
+    <value>Jetons par seconde : dernière réponse du modèle, moyenne (μ) et 95e centile (p95) des appels de modèle récents de cette session. ~ indique une estimation en direct pendant la diffusion.</value>
   </data>
   <data name="Chat_ContextUsage_Tooltip" xml:space="preserve">
     <value>Utilisation de la fenêtre de contexte</value>

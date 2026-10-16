@@ -17,9 +17,10 @@ internal sealed record ReactorChatThroughputStripProps(
 
 /// <summary>
 /// Declarative caption strip below the composer: tokens/sec (current, mean, p95) and a
-/// context-window bar. It subscribes to the provider's throughput changes itself because thinking
-/// and usage events update throughput without a chat snapshot, and a strip-local re-render avoids
-/// re-rendering the timeline for every reasoning delta.
+/// context-window bar. Thinking and usage events change throughput without a chat snapshot, so the
+/// strip subscribes to the provider's throughput notifications and re-renders itself (avoiding a
+/// timeline re-render per reasoning delta). The stats are always read from the provider in
+/// <see cref="Render"/>, so they belong to the current <c>ThreadId</c> even right after a switch.
 /// </summary>
 internal sealed class ReactorChatThroughputStrip : Component<ReactorChatThroughputStripProps>
 {
@@ -29,26 +30,27 @@ internal sealed class ReactorChatThroughputStrip : Component<ReactorChatThroughp
         var provider = props.Provider;
         var threadId = props.ThreadId;
         var (viewportWidth, setViewportWidth) = UseState(props.IsCompact ? 480d : 800d);
-        var (throughput, setThroughput) = UseState(
-            provider?.GetThroughput(threadId) ?? ChatThroughputStats.Empty,
-            threadSafe: true);
+        var (_, setRenderVersion) = UseState(0, threadSafe: true);
+        var renderVersion = UseRef(0);
         UseEffect((Func<Action>)(() =>
         {
             if (provider is null)
-            {
-                setThroughput(ChatThroughputStats.Empty);
                 return () => { };
-            }
 
             Action<string> onChanged = changedThreadId =>
             {
-                if (string.Equals(changedThreadId, threadId, StringComparison.Ordinal))
-                    setThroughput(provider.GetThroughput(threadId));
+                if (!string.Equals(changedThreadId, threadId, StringComparison.Ordinal))
+                    return;
+                lock (renderVersion)
+                {
+                    renderVersion.Current++;
+                    setRenderVersion(renderVersion.Current);
+                }
             };
             provider.ThroughputChanged += onChanged;
-            setThroughput(provider.GetThroughput(threadId));
             return () => provider.ThroughputChanged -= onChanged;
         }), provider ?? (object)string.Empty, threadId);
+        var throughput = provider?.GetThroughput(threadId) ?? ChatThroughputStats.Empty;
         var gutter = ChatVisuals.Gutter(viewportWidth);
 
         var throughputText = TextBlock(ChatUsageFormatter.FormatThroughput(throughput, props.TurnActive))
