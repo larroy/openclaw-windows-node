@@ -637,6 +637,8 @@ public sealed partial class VoiceSettingsPage : Page
 
     private void UpdateKokoroVoiceState()
     {
+        // The active download owns these controls, including during another voice's preview.
+        if (_kokoroDownloadCts != null) return;
         if (CurrentApp.Settings == null) return;
         if (KokoroVoiceCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string voiceId) return;
         var pack = KokoroModelManager.FindPackForVoice(voiceId);
@@ -664,15 +666,15 @@ public sealed partial class VoiceSettingsPage : Page
 
     private async Task OnKokoroDownloadClickAsync()
     {
+        if (_kokoroDownloadCts != null) return;
         if (CurrentApp.Settings == null) return;
         if (KokoroVoiceCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string voiceId) return;
         var pack = KokoroModelManager.FindPackForVoice(voiceId);
         if (pack == null) return;
 
-        try { _kokoroDownloadCts?.Cancel(); }
-        catch (Exception ex) { Logger.Debug($"VoiceSettingsPage: cancel prior Kokoro download failed: {ex.Message}"); }
-        _kokoroDownloadCts = new CancellationTokenSource();
-        var ct = _kokoroDownloadCts.Token;
+        using var downloadCts = new CancellationTokenSource();
+        _kokoroDownloadCts = downloadCts;
+        var ct = downloadCts.Token;
         // The download controls are shared by every voice; lock the voice picker so they keep
         // describing the pack being downloaded until this operation finishes.
         KokoroVoiceCombo.IsEnabled = false;
@@ -683,7 +685,8 @@ public sealed partial class VoiceSettingsPage : Page
         KokoroDownloadProgress.Value = 0;
         KokoroStatusText.Text = L("VoiceSettingsPage_KokoroConnecting");
 
-        var active = true;
+        string? terminalStatus = null;
+        var failed = false;
         try
         {
             var models = new KokoroModelManager(SettingsManager.SettingsDirectoryPath, new AppLogger());
@@ -691,7 +694,7 @@ public sealed partial class VoiceSettingsPage : Page
             var progress = new Progress<(long downloaded, long total)>(p =>
             {
                 // Progress<T> posts asynchronously; drop reports that arrive after completion.
-                if (!active) return;
+                if (!ReferenceEquals(_kokoroDownloadCts, downloadCts)) return;
                 var now = DateTime.UtcNow;
                 if (p.downloaded < p.total && now - lastReportUtc < TimeSpan.FromMilliseconds(150)) return;
                 lastReportUtc = now;
@@ -700,26 +703,32 @@ public sealed partial class VoiceSettingsPage : Page
                     $"{p.downloaded / (1024d * 1024d):F1}", $"{p.total / (1024d * 1024d):F1}");
             });
             await models.DownloadPackAsync(pack.PackId, progress, ct);
-            UpdateKokoroVoiceState();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            UpdateKokoroVoiceState();
-            KokoroStatusText.Text = L("VoiceSettingsPage_KokoroDownloadCanceled");
+            terminalStatus = L("VoiceSettingsPage_KokoroDownloadCanceled");
         }
         catch (Exception ex)
         {
             Logger.Error($"Kokoro voice pack download failed: {ex}");
-            KokoroStatusText.Text = KokoroDownloadFailureText(VoicePackDownloadFailure.Classify(ex), pack);
-            KokoroDownloadButton.IsEnabled = true;
-            KokoroDownloadButtonText.Text = L("VoiceSettingsPage_KokoroButtonRetry");
-            KokoroDownloadProgress.Visibility = Visibility.Collapsed;
-            UpdateCapabilityState();
+            terminalStatus = KokoroDownloadFailureText(VoicePackDownloadFailure.Classify(ex), pack);
+            failed = true;
         }
         finally
         {
-            active = false;
-            KokoroVoiceCombo.IsEnabled = true;
+            if (ReferenceEquals(_kokoroDownloadCts, downloadCts))
+            {
+                _kokoroDownloadCts = null;
+                KokoroVoiceCombo.IsEnabled = true;
+                UpdateKokoroVoiceState();
+                if (terminalStatus != null)
+                    KokoroStatusText.Text = terminalStatus;
+                if (failed)
+                {
+                    KokoroDownloadButton.IsEnabled = true;
+                    KokoroDownloadButtonText.Text = L("VoiceSettingsPage_KokoroButtonRetry");
+                }
+            }
         }
     }
 
@@ -781,7 +790,8 @@ public sealed partial class VoiceSettingsPage : Page
         {
             Logger.Error($"Kokoro voice pack preview failed: {ex}");
             KokoroPreviewIcon.Glyph = "\uEA39";
-            KokoroStatusText.Text = L("VoiceSettingsPage_KokoroPreviewFailed");
+            if (_kokoroDownloadCts == null)
+                KokoroStatusText.Text = L("VoiceSettingsPage_KokoroPreviewFailed");
             await System.Threading.Tasks.Task.Delay(3000);
         }
         finally

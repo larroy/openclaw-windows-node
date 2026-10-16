@@ -33,6 +33,11 @@ The download managers fail closed:
 Concurrent requests for the same model or voice share one single-flight
 download, preventing multiple writers from racing over the same temporary file.
 
+In Voice settings, an active Kokoro download owns its picker, status and progress
+until its wait ends. Completing a different voice's preview cannot reset those
+controls, and duplicate Download clicks do not replace the active waiter.
+Cancellation still ends only that caller's wait, not the shared transfer.
+
 `AssetHashPinningTests` guards the catalog shape by requiring a lowercase
 64-character SHA-256 and an HTTPS URL for every shipped entry.
 
