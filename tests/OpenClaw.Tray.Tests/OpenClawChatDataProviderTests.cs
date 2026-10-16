@@ -6714,6 +6714,53 @@ public class OpenClawChatDataProviderTests
     }
 
     [Fact]
+    public async Task BufferedLifecycleStartAfterReset_ResetsThroughputBaseline()
+    {
+        // sessions.reset can buffer lifecycle start until chat.send is accepted. That open
+        // must start a new throughput run; otherwise the next usage total is subtracted from
+        // the previous run (150 - 100 over 2s = 25 tps instead of 75).
+        var sendGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new OpenClaw.TestSupport.ManualTimeProvider();
+        var (bridge, provider, _, _) = CreateProvider(
+            new[] { MainSession() },
+            throughputTimeProvider: clock);
+        bridge.SendBehavior = (_, _, _) => sendGate.Task;
+        await provider.LoadAsync();
+
+        bridge.RaiseAgent(MakeAgentEvent("lifecycle", """{"phase":"start"}""", runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"x","delta":"x"}""", runId: "run-1"));
+        clock.Advance(TimeSpan.FromSeconds(2));
+        bridge.RaiseAgent(MakeAgentEvent("usage", """{"outputTokens":100}""", runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("lifecycle", """{"phase":"end"}""", runId: "run-1"));
+        Assert.Equal(50d, provider.GetThroughput("main").LatestTokensPerSecond);
+
+        bridge.RaiseSessionCommandCompleted(new SessionCommandResult
+        {
+            Method = "sessions.reset",
+            Ok = true,
+            Key = "main"
+        });
+
+        var sendTask = provider.SendMessageAsync("main", "after reset");
+        var earlyStart = MakeAgentEvent("lifecycle", """{"phase":"start"}""", runId: "new-run");
+        earlyStart.Ts = DateTimeOffset.UtcNow.AddSeconds(1).ToUnixTimeMilliseconds();
+        bridge.RaiseAgent(earlyStart);
+        Assert.Equal(50d, provider.GetThroughput("main").LatestTokensPerSecond);
+
+        bridge.SendResults.Enqueue(new ChatSendResult { RunId = "new-run" });
+        sendGate.SetResult();
+        await sendTask;
+
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"y","delta":"y"}""", runId: "new-run"));
+        clock.Advance(TimeSpan.FromSeconds(2));
+        bridge.RaiseAgent(MakeAgentEvent("usage", """{"outputTokens":150}""", runId: "new-run"));
+
+        var stats = provider.GetThroughput("main");
+        Assert.Equal(2, stats.SampleCount);
+        Assert.Equal(75d, stats.LatestTokensPerSecond);
+    }
+
+    [Fact]
     public async Task AgentEvent_LifecycleError_AppendsErrorStatusEntry()
     {
         var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
