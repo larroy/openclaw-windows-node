@@ -1,0 +1,188 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace OpenClawTray.Chat;
+
+internal sealed record ChatThroughputStats(
+    double? LatestTokensPerSecond,
+    double? LiveTokensPerSecond,
+    double? MeanTokensPerSecond,
+    double? P95TokensPerSecond,
+    int SampleCount)
+{
+    internal static ChatThroughputStats Empty { get; } = new(null, null, null, null, 0);
+}
+
+/// <summary>
+/// Per-session model output throughput. Live deltas carry no token counts, so the live value is a
+/// characters-per-token estimate over streamed reasoning and assistant text. Exact samples are
+/// output tokens over the streaming window of one model call: from its first streamed text to the
+/// gateway <c>usage</c> event that closes it (or, for gateways without that stream, to the final
+/// assistant message). Only exact samples feed mean and p95.
+/// Called from gateway threads and read on the UI thread, hence the lock.
+/// </summary>
+internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
+{
+    internal const int MaxSamples = 50;
+    internal const double CharactersPerToken = 4d;
+    internal static readonly TimeSpan MinimumWindow = TimeSpan.FromMilliseconds(250);
+
+    private readonly object _gate = new();
+    private readonly Dictionary<string, ThreadState> _threads = new(StringComparer.Ordinal);
+
+    /// <summary>Raised with the thread id after a change that can alter <see cref="Get"/>; outside the lock.</summary>
+    public event Action<string>? Changed;
+
+    /// <summary>Starts a run: closes any open segment and resets the run's cumulative token baseline.</summary>
+    public void StartRun(string threadId)
+    {
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state))
+                return;
+            state.ClearSegment();
+            state.RunOutputTokens = 0;
+            state.RunReportsUsage = false;
+        }
+        Changed?.Invoke(threadId);
+    }
+
+    /// <summary>Records streamed assistant or reasoning text; the first call opens the segment window.</summary>
+    public void ObserveText(string threadId, int characters)
+    {
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state))
+                _threads[threadId] = state = new ThreadState();
+
+            var now = timeProvider.GetTimestamp();
+            if (state.SegmentStart is null)
+            {
+                state.SegmentStart = now;
+                state.Characters = 0;
+            }
+            state.LastTextAt = now;
+            state.Characters += Math.Max(0, characters);
+        }
+        if (characters > 0)
+            Changed?.Invoke(threadId);
+    }
+
+    /// <summary>Closes the current segment without a sample (tool activity).</summary>
+    public void ResetSegment(string threadId)
+    {
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state) || state.SegmentStart is null)
+                return;
+            state.ClearSegment();
+        }
+        Changed?.Invoke(threadId);
+    }
+
+    /// <summary>
+    /// Closes the segment at a completed model call. <paramref name="runOutputTokens"/> is the
+    /// run-cumulative total, so the call's own tokens are the increase since the previous event.
+    /// </summary>
+    public bool ObserveRunUsage(string threadId, long runOutputTokens)
+    {
+        bool recorded;
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state))
+                _threads[threadId] = state = new ThreadState();
+
+            // A smaller total means a new run generation whose start we did not observe.
+            var callTokens = runOutputTokens >= state.RunOutputTokens
+                ? runOutputTokens - state.RunOutputTokens
+                : runOutputTokens;
+            state.RunOutputTokens = runOutputTokens;
+            state.RunReportsUsage = true;
+            recorded = RecordSegmentLocked(state, callTokens);
+        }
+        Changed?.Invoke(threadId);
+        return recorded;
+    }
+
+    /// <summary>
+    /// Closes the segment at the final assistant message. Records a sample only when the run has not
+    /// already reported per-call usage, so the same tokens are never counted twice.
+    /// </summary>
+    public bool CompleteAssistant(string threadId, int? outputTokens)
+    {
+        bool recorded;
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state))
+                return false;
+
+            recorded = state.RunReportsUsage
+                ? RecordSegmentLocked(state, 0)
+                : RecordSegmentLocked(state, outputTokens ?? 0);
+        }
+        Changed?.Invoke(threadId);
+        return recorded;
+    }
+
+    private bool RecordSegmentLocked(ThreadState state, long outputTokens)
+    {
+        var start = state.SegmentStart;
+        state.ClearSegment();
+        if (start is null || outputTokens <= 0)
+            return false;
+
+        var window = timeProvider.GetElapsedTime(start.Value, timeProvider.GetTimestamp());
+        if (window < MinimumWindow)
+            return false;
+
+        state.Samples.Enqueue(outputTokens / window.TotalSeconds);
+        while (state.Samples.Count > MaxSamples)
+            state.Samples.Dequeue();
+        return true;
+    }
+
+    public ChatThroughputStats Get(string threadId)
+    {
+        lock (_gate)
+        {
+            if (!_threads.TryGetValue(threadId, out var state))
+                return ChatThroughputStats.Empty;
+
+            double? live = null;
+            if (state.SegmentStart is { } start && state.Characters > 0)
+            {
+                var elapsed = timeProvider.GetElapsedTime(start, state.LastTextAt);
+                if (elapsed >= MinimumWindow)
+                    live = state.Characters / CharactersPerToken / elapsed.TotalSeconds;
+            }
+
+            var count = state.Samples.Count;
+            if (count == 0)
+                return new ChatThroughputStats(null, live, null, null, 0);
+
+            var sorted = state.Samples.ToArray();
+            var latest = sorted[^1];
+            var mean = sorted.Average();
+            Array.Sort(sorted);
+            var p95 = sorted[(int)Math.Ceiling(0.95 * count) - 1];
+            return new ChatThroughputStats(latest, live, mean, p95, count);
+        }
+    }
+
+    private sealed class ThreadState
+    {
+        public long? SegmentStart;
+        public long LastTextAt;
+        public long Characters;
+        public long RunOutputTokens;
+        public bool RunReportsUsage;
+        public readonly Queue<double> Samples = new();
+
+        public void ClearSegment()
+        {
+            SegmentStart = null;
+            Characters = 0;
+        }
+    }
+}
