@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -242,11 +243,23 @@ internal static class SetupPairingCredentialPolicy
 
 internal static class WindowsGatewayReachability
 {
+    /// <summary>Environment variable overriding <see cref="DefaultTimeoutSeconds"/>; unset or
+    /// blank silently keeps the default, and other invalid values warn and fall back. The
+    /// unit is seconds. The name is deliberately short enough to stay below the shared
+    /// log sanitizer's 43-char base64url redaction so the warning keeps the variable name.</summary>
+    internal const string TimeoutEnvironmentVariable = "OPENCLAW_SETUP_REACHABILITY_TIMEOUT";
+
+    /// <summary>Default bound for the single pre-pairing HTTP probe (whole exchange:
+    /// connect + TLS + response). Generous so a slow WSL port-forward proxy or a cold
+    /// remote endpoint (e.g. Tailscale Serve) is not misjudged as unreachable; callers
+    /// get this budget instead of the WebSocket's own longer connect timeout.</summary>
+    internal const int DefaultTimeoutSeconds = 30;
+
     public static async Task<StepResult> VerifyAsync(SetupContext ctx, string pairingRole, CancellationToken ct)
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var http = new HttpClient { Timeout = ResolveTimeout(ctx.Logger) };
             var healthUri = BuildHealthUri(ctx.GatewayUrl!);
             var resp = await http.GetAsync(healthUri, ct);
             ctx.Logger.Debug($"Gateway health check: HTTP {(int)resp.StatusCode}");
@@ -260,6 +273,26 @@ internal static class WindowsGatewayReachability
         {
             return StepResult.Fail($"Gateway not reachable before {pairingRole} pairing: {ex.Message}");
         }
+    }
+
+    internal static TimeSpan ResolveTimeout(SetupLogger? logger = null)
+    {
+        var raw = Environment.GetEnvironmentVariable(TimeoutEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(raw))
+            return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
+
+        // HttpClient.Timeout throws for values above int.MaxValue milliseconds, which
+        // VerifyAsync would misreport as "gateway not reachable"; reject those here.
+        if (int.TryParse(raw.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) &&
+            seconds > 0 && seconds <= int.MaxValue / 1000)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        logger?.Warn(
+            $"Ignoring {TimeoutEnvironmentVariable}='{raw}': expected a positive integer of at most " +
+            $"{int.MaxValue / 1000}s. Using the default {DefaultTimeoutSeconds}s gateway reachability timeout.");
+        return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
     }
 
     internal static Uri BuildHealthUri(string gatewayUrl)
