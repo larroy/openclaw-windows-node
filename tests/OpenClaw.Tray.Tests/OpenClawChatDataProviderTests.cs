@@ -287,13 +287,14 @@ public class OpenClawChatDataProviderTests
             Func<TimeSpan, CancellationToken, Func<Task>, Task>? historyRetryScheduler = null,
             Action? historyFailureReservedForTesting = null,
             Func<Func<Task>, Task>? deferredAbortScheduler = null,
-            Action<Action>? post = null)
+            Action<Action>? post = null,
+            TimeProvider? throughputTimeProvider = null)
     {
         var bridge = new FakeBridge { Sessions = initial ?? Array.Empty<SessionInfo>() };
         var provider = toolMetaCachePath is null && attachmentMetaCachePath is null && lastChatStatePath is null &&
             lastChatStateSaveDelay is null && historyRetryScheduler is null && historyFailureReservedForTesting is null &&
             lastStateSaveReservedForTesting is null && beforeSelectedStateSaveForTesting is null &&
-            deferredAbortScheduler is null && post is null
+            deferredAbortScheduler is null && post is null && throughputTimeProvider is null
             ? new OpenClawChatDataProvider(bridge)
             : new OpenClawChatDataProvider(
                 bridge,
@@ -304,7 +305,8 @@ public class OpenClawChatDataProviderTests
                 lastChatStateSaveDelay: lastChatStateSaveDelay,
                 historyRetryScheduler: historyRetryScheduler,
                 historyFailureReservedForTesting: historyFailureReservedForTesting,
-                deferredAbortScheduler: deferredAbortScheduler);
+                deferredAbortScheduler: deferredAbortScheduler,
+                throughputTimeProvider: throughputTimeProvider);
         provider.SetPersistenceTestHooks(
             lastStateSaveReservedForTesting,
             beforeSelectedStateSaveForTesting);
@@ -7429,6 +7431,64 @@ public class OpenClawChatDataProviderTests
         var timeline = snap.Timelines["main"];
         Assert.False(timeline.TurnActive);
         Assert.Null(timeline.ActiveAssistantId);
+    }
+
+    [Fact]
+    public async Task AssistantStreamThenFinal_RecordsExactThroughputSample()
+    {
+        var clock = new OpenClaw.TestSupport.ManualTimeProvider();
+        var (bridge, provider, _, _) = CreateProvider(new[] { MainSession() }, throughputTimeProvider: clock);
+        await provider.LoadAsync();
+
+        bridge.RaiseAgent(MakeAgentEvent("lifecycle", """{"phase":"start"}""", runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("assistant", """{"delta":"Hello world"}""", runId: "run-1"));
+        clock.Advance(TimeSpan.FromSeconds(2));
+        bridge.RaiseChat(new ChatMessageInfo
+        {
+            SessionKey = "main",
+            Role = "assistant",
+            Text = "Hello world",
+            State = "final",
+            OutputTokens = 100,
+        });
+
+        var stats = provider.GetThroughput("main");
+        Assert.Equal(1, stats.SampleCount);
+        Assert.Equal(50d, stats.LatestTokensPerSecond);
+    }
+
+    [Fact]
+    public async Task ThinkingThenUsageThenBurstReply_RecordsPerCallThroughputAndNotifies()
+    {
+        // Gateway order observed live: thinking deltas stream, the usage event closes the model
+        // call with the run-cumulative output tokens, then the reply text arrives in one burst.
+        var clock = new OpenClaw.TestSupport.ManualTimeProvider();
+        var (bridge, provider, _, _) = CreateProvider(new[] { MainSession() }, throughputTimeProvider: clock);
+        await provider.LoadAsync();
+        var changed = new List<string>();
+        provider.ThroughputChanged += changed.Add;
+
+        bridge.RaiseAgent(MakeAgentEvent("lifecycle", """{"phase":"start"}""", runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"Let me","delta":"Let me"}""", runId: "run-1"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"Let me think","delta":" think"}""", runId: "run-1"));
+        Assert.NotNull(provider.GetThroughput("main").LiveTokensPerSecond);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        bridge.RaiseAgent(MakeAgentEvent("usage", """{"outputTokens":100}""", runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("assistant", """{"delta":"Hello world"}""", runId: "run-1"));
+        bridge.RaiseChat(new ChatMessageInfo
+        {
+            SessionKey = "main",
+            Role = "assistant",
+            Text = "Hello world",
+            State = "final",
+            OutputTokens = 100,
+        });
+
+        var stats = provider.GetThroughput("main");
+        Assert.Equal(1, stats.SampleCount);
+        Assert.Equal(50d, stats.LatestTokensPerSecond);
+        Assert.Contains("main", changed);
     }
 
     [Fact]
