@@ -1644,6 +1644,11 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             _throughput.StartRun(threadId);
             return;
         }
+        if (ChatEventMapper.IsTerminalRunEvent(evt))
+        {
+            _throughput.EndRun(threadId);
+            return;
+        }
         if (transition.Suppressed)
             return;
         // Gateway `thinking` and `usage` streams are not timeline events (no MappedEvent), but
@@ -1685,6 +1690,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         if (opened is null)
             return;
 
+        // Buffered lifecycle starts (reset gate) open here without passing ObserveThroughput.
+        _throughput.StartRun(threadId);
         _telemetry.ObserveLifecycleStart(
             threadId,
             opened.Event.RunId,

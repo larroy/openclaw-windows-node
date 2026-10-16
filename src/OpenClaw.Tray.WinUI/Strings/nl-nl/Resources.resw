@@ -3005,7 +3005,7 @@ Gebruik een van deze opties:
     <value>Redenering</value>
   </data>
   <data name="Chat_Throughput_Tooltip" xml:space="preserve">
-    <value>Tokens per seconde: laatste antwoord, gemiddelde (μ) en 95e percentiel (p95) van recente antwoorden in deze sessie. ~ geeft een live schatting tijdens het streamen aan.</value>
+    <value>Tokens per seconde: laatste modelantwoord, gemiddelde (μ) en 95e percentiel (p95) van recente modelaanroepen in deze sessie. ~ geeft een live schatting tijdens het streamen aan.</value>
   </data>
   <data name="Chat_ContextUsage_Tooltip" xml:space="preserve">
     <value>Gebruik van het contextvenster</value>
