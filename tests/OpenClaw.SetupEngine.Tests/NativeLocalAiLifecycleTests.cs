@@ -528,7 +528,8 @@ public sealed class NativeLocalAiLifecycleTests
         };
         var hardware = new HostHardwareInfo(Architecture.X64, 128L << 30, 100L << 30,
             [new(GpuVendor.Nvidia, "Test GPU", 96L << 30, 80L << 30,
-                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test")], false);
+                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test",
+                ComputeCapability: new Version(12, 0))], false);
         var host = new SetupLocalAiHost(
             () => throw new InvalidOperationException("Native continuation must not resolve WSL."),
             () => null, () => runtime, _ => Task.FromResult<LocalAiResolvedInstall?>(fixture.Install),
@@ -607,7 +608,8 @@ public sealed class NativeLocalAiLifecycleTests
         var authorizations = 0;
         var hardware = new HostHardwareInfo(Architecture.X64, 128L << 30, 100L << 30,
             [new(GpuVendor.Nvidia, "Test GPU", 96L << 30, 80L << 30,
-                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test")], false);
+                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test",
+                ComputeCapability: new Version(12, 0))], false);
         var host = new SetupLocalAiHost(
             () => throw new InvalidOperationException("Native observation must not resolve WSL."),
             () => null, () => null, _ => Task.FromResult<LocalAiResolvedInstall?>(null),
@@ -887,7 +889,8 @@ public sealed class NativeLocalAiLifecycleTests
         };
         var hardware = new HostHardwareInfo(Architecture.X64, 128L << 30, 100L << 30,
             [new(GpuVendor.Nvidia, "Test GPU", 96L << 30, 80L << 30,
-                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test")], false);
+                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test",
+                ComputeCapability: new Version(12, 0))], false);
         var host = new SetupLocalAiHost(() => throw new InvalidOperationException(), () => fixture.Registry,
             () => runtime, _ => Task.FromResult<LocalAiResolvedInstall?>(fixture.Install),
             (_, _) => Task.FromResult(true), _ => Task.FromResult(hardware),
@@ -1204,7 +1207,8 @@ public sealed class NativeLocalAiLifecycleTests
         else fixture.Rpc.Config["models"]!["providers"]!["llamacpp"] = new JsonObject();
         var hardware = new HostHardwareInfo(Architecture.X64, 128L << 30, 100L << 30,
             [new(GpuVendor.Nvidia, "Test GPU", 96L << 30, 80L << 30,
-                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test")], false);
+                DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test",
+                ComputeCapability: new Version(12, 0))], false);
         var host = new SetupLocalAiHost(
             () => throw new InvalidOperationException("No WSL inspection."),
             () => null, () => null, _ => Task.FromResult<LocalAiResolvedInstall?>(fixture.Install),
@@ -1330,7 +1334,8 @@ public sealed class NativeLocalAiLifecycleTests
         {
             var hardware = new HostHardwareInfo(Architecture.X64, 128L << 30, 100L << 30,
                 [new(GpuVendor.Nvidia, "Test GPU", 96L << 30, 80L << 30,
-                    DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test")], false);
+                    DriverVersion: "615.0", CudaMajorVersion: 13, StableId: "GPU-test",
+                    ComputeCapability: new Version(12, 0))], false);
             var host = new SetupLocalAiHost(
                 () => throw new InvalidOperationException("No WSL inspection."),
                 () => null, () => null, _ => Task.FromResult<LocalAiResolvedInstall?>(Install),
