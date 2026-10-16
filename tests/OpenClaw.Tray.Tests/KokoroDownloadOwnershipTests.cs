@@ -10,6 +10,8 @@ public sealed class KokoroDownloadOwnershipTests
     [InlineData("failure")]
     [InlineData("duplicate-click")]
     [InlineData("preview-failure")]
+    [InlineData("storage-failure")]
+    [InlineData("storage-refresh-after-success")]
     public async Task PreviewCompletion_PreservesPendingDownloadAndTerminalState(string scenario)
     {
         var root = TestRepositoryPaths.GetRepositoryRoot();

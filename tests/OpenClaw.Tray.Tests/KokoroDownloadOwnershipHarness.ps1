@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$RepositoryRoot,
     [Parameter(Mandatory)]
-    [ValidateSet('success', 'canceled', 'failure', 'duplicate-click', 'preview-failure')]
+    [ValidateSet('success', 'canceled', 'failure', 'duplicate-click', 'preview-failure', 'storage-failure', 'storage-refresh-after-success')]
     [string]$Scenario
 )
 $ErrorActionPreference = 'Stop'
@@ -60,7 +60,11 @@ public sealed class KokoroModelManager
     public static CancellationToken WaitToken;
     public static int Requests;
     public static bool Downloaded;
-    public KokoroModelManager(string path, AppLogger logger) { }
+    public static bool StorageUnavailable;
+    public KokoroModelManager(string path, AppLogger logger)
+    {
+        if (StorageUnavailable) throw new System.IO.IOException("Synthetic model storage unavailable");
+    }
     public static KokoroModelPackInfo FindPackForVoice(string voiceId) => new(voiceId, 400_000_000);
     public static Voice FindVoice(string voiceId) => new("en-US");
     public bool IsPackDownloaded(string packId) => packId == "Maple" || Downloaded;
@@ -174,8 +178,10 @@ public sealed class KokoroDownloadHarness
                 page.AssertBusy(download, status);
             }
 
+            var storageFailure = scenario == "storage-failure" || scenario == "storage-refresh-after-success";
+            KokoroModelManager.StorageUnavailable = storageFailure;
             if (scenario == "canceled") owner.Cancel();
-            else if (scenario == "failure")
+            else if (scenario == "failure" || scenario == "storage-failure")
                 KokoroModelManager.Download.SetException(new InvalidOperationException("synthetic download failure"));
             else
             {
@@ -183,16 +189,17 @@ public sealed class KokoroDownloadHarness
                 KokoroModelManager.Download.SetResult(true);
             }
             pump.Until(() => download.IsCompleted);
+            Require(!download.IsFaulted, "Terminal refresh escaped instead of restoring download recovery controls.");
             download.GetAwaiter().GetResult();
             Require(page.KokoroVoiceCombo.IsEnabled, "Terminal download must unlock the picker.");
             Require(page._kokoroDownloadCts == null, "Terminal download retained ownership.");
             Require(page.KokoroDownloadProgress.Visibility == Visibility.Collapsed, "Terminal download must hide progress.");
-            if (scenario == "canceled" || scenario == "failure")
+            if (scenario == "canceled" || scenario == "failure" || storageFailure)
             {
                 Require(page.KokoroDownloadButton.IsEnabled, "Canceled/failed download must allow retry.");
                 Require(page.KokoroStatusText.Text == (scenario == "canceled"
                     ? L("VoiceSettingsPage_KokoroDownloadCanceled") : "sanitized-failure"), "Terminal status was lost.");
-                Require(page.KokoroDownloadButtonText.Text == L(scenario == "failure"
+                Require(page.KokoroDownloadButtonText.Text == L(scenario != "canceled"
                     ? "VoiceSettingsPage_KokoroButtonRetry" : "VoiceSettingsPage_KokoroButtonDownloadPack"), "Wrong retry label.");
             }
             else

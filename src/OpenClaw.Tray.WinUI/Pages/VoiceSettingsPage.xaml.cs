@@ -720,13 +720,24 @@ public sealed partial class VoiceSettingsPage : Page
             {
                 _kokoroDownloadCts = null;
                 KokoroVoiceCombo.IsEnabled = true;
-                UpdateKokoroVoiceState();
+                try
+                {
+                    UpdateKokoroVoiceState();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"Kokoro voice pack status refresh failed: {ex}");
+                    terminalStatus ??= KokoroDownloadFailureText(VoicePackDownloadFailure.Classify(ex), pack);
+                    failed = true;
+                }
+                KokoroDownloadProgress.Visibility = Visibility.Collapsed;
                 if (terminalStatus != null)
                     KokoroStatusText.Text = terminalStatus;
                 if (failed)
                 {
                     KokoroDownloadButton.IsEnabled = true;
                     KokoroDownloadButtonText.Text = L("VoiceSettingsPage_KokoroButtonRetry");
+                    UpdateCapabilityState();
                 }
             }
         }

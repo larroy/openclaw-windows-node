@@ -37,6 +37,8 @@ In Voice settings, an active Kokoro download owns its picker, status and progres
 until its wait ends. Completing a different voice's preview cannot reset those
 controls, and duplicate Download clicks do not replace the active waiter.
 Cancellation still ends only that caller's wait, not the shared transfer.
+Terminal recovery restores Retry and hides progress even when a storage-backed
+status refresh fails, while retaining a sanitized error message.
 
 `AssetHashPinningTests` guards the catalog shape by requiring a lowercase
 64-character SHA-256 and an HTTPS URL for every shipped entry.
