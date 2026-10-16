@@ -1,11 +1,28 @@
 using OpenClaw.Shared.Inference;
 using OpenClaw.Shared.Inference.Catalog;
+using OpenClaw.TestSupport;
 using RuntimeArchitecture = System.Runtime.InteropServices.Architecture;
 
 namespace OpenClaw.Shared.Tests;
 
 public class NemotronBoltCatalogTests
 {
+    [Fact]
+    public void Bolt_ResolvesPrereleasePinsOnlyForTheirInstalledSource()
+    {
+        var model = Assert.IsType<LocalModelInfo>(LocalModelCatalog.FindInstalled(
+            "nemotron-3.5-bolt-74b-a9b-iq2-lilicorr", NemotronBoltPrereleaseFixture.Weights.DownloadUri.AbsoluteUri));
+
+        Assert.Equal(NemotronBoltPrereleaseFixture.Weights, model.Weights);
+        Assert.Equal(NemotronBoltPrereleaseFixture.DraftWeights, model.Recipe.DraftWeights);
+        Assert.DoesNotContain(model, LocalModelCatalog.Models);
+        Assert.DoesNotContain(model, LocalModelCatalog.ExplicitAlternatives);
+        Assert.NotEqual(model, LocalModelCatalog.Find(model.Id));
+        Assert.Same(LocalModelCatalog.Find(model.Id), LocalModelCatalog.FindInstalled(model.Id));
+        Assert.Same(LocalModelCatalog.Find(model.Id), LocalModelCatalog.FindInstalled(model.Id, "https://example.invalid/model.gguf"));
+        Assert.Equal(new[] { 262_144, 131_072 }, LocalModelCatalog.GetProfiles(model).Select(p => p.ContextTokens));
+    }
+
     [Fact]
     public void Bolt_PinsIndependentlyVerifiedTargetAndDrafter()
     {
