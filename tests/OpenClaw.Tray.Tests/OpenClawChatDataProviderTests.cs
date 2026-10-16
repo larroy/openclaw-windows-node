@@ -6725,6 +6725,27 @@ public class OpenClawChatDataProviderTests
     }
 
     [Fact]
+    public async Task UsageForRunStartedBeforeProvider_RecordsNoOutlierSample()
+    {
+        var clock = new OpenClaw.TestSupport.ManualTimeProvider();
+        var (bridge, provider, _, _) = CreateProvider(new[] { MainSession() }, throughputTimeProvider: clock);
+        await provider.LoadAsync();
+
+        // No lifecycle start observed: the run-cumulative total covers calls this provider never timed.
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"x","delta":"x"}""", runId: "run-1"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        bridge.RaiseAgent(MakeAgentEvent("usage", """{"outputTokens":5000}""", runId: "run-1"));
+
+        Assert.Equal(0, provider.GetThroughput("main").SampleCount);
+
+        // The adopted baseline makes the next call in the same run measurable.
+        bridge.RaiseAgent(MakeAgentEvent("thinking", """{"text":"xy","delta":"y"}""", runId: "run-1"));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        bridge.RaiseAgent(MakeAgentEvent("usage", """{"outputTokens":5060}""", runId: "run-1"));
+        Assert.Equal(60d, provider.GetThroughput("main").LatestTokensPerSecond);
+    }
+
+    [Fact]
     public async Task AgentEvent_LifecycleError_AppendsErrorStatusEntry()
     {
         var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
