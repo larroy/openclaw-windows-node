@@ -43,8 +43,8 @@ status refresh fails, while retaining a sanitized error message.
 The selected Kokoro voice pack also downloads in the background
 (`KokoroVoicePackPrefetcher`), evaluated at tray startup and after every settings
 save. It runs only when Kokoro is the TTS provider, node or voice-response TTS is
-enabled, `TtsKokoroAutoDownload` is true, and the connection is not metered,
-roaming, over its data limit, or offline. It touches `models\kokoro` only after
+enabled, `TtsKokoroAutoDownload` is true, and Windows reports the connection as
+unrestricted (not metered, unknown cost, roaming, over its data limit, or offline). It touches `models\kokoro` only after
 the provider, TTS, and auto-download checks pass, and an unusable models
 directory is logged as a skipped prefetch rather than interrupting tray startup.
 A skipped or failed prefetch waits for the next launch or save. Deleting the pack

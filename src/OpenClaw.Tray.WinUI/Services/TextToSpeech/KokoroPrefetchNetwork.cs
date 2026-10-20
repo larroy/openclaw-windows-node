@@ -8,13 +8,18 @@ namespace OpenClawTray.Services;
 /// </summary>
 internal static class KokoroPrefetchNetwork
 {
-    /// <summary>Metered, roaming, over-limit, or offline connections skip the ~380 MB download.</summary>
+    /// <summary>
+    /// Only an unrestricted connection allows the ~380 MB download. Metered, roaming,
+    /// over-limit, offline, and unknown-cost connections skip it: Windows reports
+    /// <see cref="NetworkCostType.Unknown"/> when it cannot classify the connection,
+    /// which may still be a metered one.
+    /// </summary>
     public static bool IsMeteredConnection()
     {
         var profile = NetworkInformation.GetInternetConnectionProfile();
         if (profile is null) return true;
         var cost = profile.GetConnectionCost();
-        return cost.NetworkCostType is NetworkCostType.Fixed or NetworkCostType.Variable
+        return cost.NetworkCostType != NetworkCostType.Unrestricted
             || cost.Roaming
             || cost.OverDataLimit;
     }
