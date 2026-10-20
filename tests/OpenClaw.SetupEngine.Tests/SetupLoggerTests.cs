@@ -17,6 +17,24 @@ public class SetupLoggerTests : IDisposable
     }
 
     [Fact]
+    public void WritesAfterDisposeAreDroppedWithoutThrowing()
+    {
+        var path = Path.Combine(_tempDir, "native-setup.jsonl");
+        var entries = new List<LogEntry>();
+        var logger = new SetupLogger(path);
+        logger.LogEmitted += (_, e) => entries.Add(e);
+        logger.Info("before");
+        logger.Dispose();
+
+        logger.Info("after");
+
+        var text = File.ReadAllText(path);
+        Assert.Contains("before", text);
+        Assert.DoesNotContain("after", text);
+        Assert.Contains(entries, entry => entry.Message == "after");
+    }
+
+    [Fact]
     public void Redaction_RedactsTokenValues()
     {
         var entries = new List<LogEntry>();

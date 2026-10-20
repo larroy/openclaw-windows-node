@@ -529,12 +529,18 @@ reload setting intact. Stopping either runtime does not delete its configuration
 ### Isolated listener proof and legacy process ownership
 
 After a successful package start acknowledgement, `IsolatedGatewayRuntime`
-allows up to three minutes, including the start command, for its own start to
-become ready. A late successful acknowledgement retains ten seconds for status
-confirmation, extending the start/status ceiling to at most 190 seconds. This
-allowance remains subordinate to caller deadlines; the outer 210-second connection
+allows up to three minutes by default, including the start command, for its own start to
+become ready. `OPENCLAW_NATIVE_GATEWAY_START_TIMEOUT` (whole seconds, 30 to 3600,
+read once per process) overrides that budget; the package command timeout never drops
+below three minutes, and the derived credential handoff and setup connection phase
+budgets grow with a longer override. A late successful acknowledgement retains ten seconds for status
+confirmation, extending the start/status ceiling to at most 190 seconds at the default. This
+allowance remains subordinate to caller deadlines; the outer 210-second default connection
 budget also includes preflight, inspection and handshake work. It polls status
 every two seconds without issuing another start.
+A timeout raises `NativeGatewayStartupTimeoutException` with its phase (start request or
+readiness), budget and last package status. Its message uses only validated lifecycle
+states and token-shaped readiness reason codes, never package prose.
 `starting` or `unhealthy` with no listener is only a pending observation, never
 credential authority. A listener racing the pending observation permits one fresh
 status recheck, but only `running` plus full port/process attribution can pass.

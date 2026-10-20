@@ -1,3 +1,5 @@
+using OpenClaw.Connection;
+
 namespace OpenClaw.SetupEngine;
 
 public enum SetupNativeCompletionPhase { PageDrain, Connection, ModelRecovery, ModelVerification, Verification }
@@ -26,7 +28,11 @@ public sealed class SetupNativeCompletionTimeoutException : TimeoutException
 /// <summary>Finite phase budgets for an already selected native setup destination.</summary>
 public static class SetupNativeCompletionTiming
 {
-    public static readonly TimeSpan Connection = TimeSpan.FromSeconds(210);
+    // The published borrow includes the native start budget (OPENCLAW_NATIVE_GATEWAY_START_TIMEOUT) plus handshake.
+    public static readonly TimeSpan Connection =
+        NativeGatewayEndpointSecurity.CredentialHandoffTimeout > TimeSpan.FromSeconds(210)
+            ? NativeGatewayEndpointSecurity.CredentialHandoffTimeout
+            : TimeSpan.FromSeconds(210);
     public static readonly TimeSpan ModelRecovery = TimeSpan.FromSeconds(210);
     public static readonly TimeSpan ModelVerification = TimeSpan.FromSeconds(150);
     public static readonly TimeSpan Navigation = TimeSpan.FromSeconds(30);
