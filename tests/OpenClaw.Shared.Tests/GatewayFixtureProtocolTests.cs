@@ -231,6 +231,21 @@ public sealed partial class GatewayFixtureProtocolTests
         Assert.Throws<ArgumentException>(() => GatewayScenario.LoadBuiltin("not-a-scenario"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealClient_AdvertisesExecApprovalsOnlyWhenExplicitlyEnabled(bool supportsExecApprovals)
+    {
+        var token = CreateToken();
+        await using var server = await FixtureGatewayServer.StartAsync(GatewayScenario.CreateBrowse(), token);
+        await using var connected = await ConnectedClient.OpenAsync(server, token, supportsExecApprovals);
+
+        Assert.Equal(
+            supportsExecApprovals,
+            Assert.Single(server.Requests, request => request.Method == "connect").AdvertisesExecApprovals);
+        Assert.Empty(server.UnexpectedRequests);
+    }
+
     [Fact]
     public async Task RealClient_ChallengeHandshakeResolvesCanonicalMainAndPopulatesAllSessions()
     {
@@ -242,6 +257,7 @@ public sealed partial class GatewayFixtureProtocolTests
         Assert.Equal(IPAddress.Loopback.ToString(), server.Endpoint.Host);
         Assert.NotEqual(0, server.Endpoint.Port);
         Assert.True(client.HasHandshakeSnapshot);
+        Assert.False(Assert.Single(server.Requests, request => request.Method == "connect").AdvertisesExecApprovals);
         Assert.Equal(GatewayScenario.MainSessionKey, client.MainSessionKey);
         Assert.Equal(["operator.read"], client.GrantedOperatorScopes);
         await server.HandshakeCompleted.WaitAsync(Deadline);
@@ -739,13 +755,17 @@ public sealed partial class GatewayFixtureProtocolTests
     {
         public OpenClawGatewayClient Client { get; } = client;
 
-        public static async Task<ConnectedClient> OpenAsync(FixtureGatewayServer server, string token)
+        public static async Task<ConnectedClient> OpenAsync(
+            FixtureGatewayServer server, string token, bool supportsExecApprovals = false)
         {
             var startupOccurrence = server.Requests.Count(r => r.Method == "agents.list") + 1;
             var identity = CreateIdentity();
             var client = new OpenClawGatewayClient(
                 server.Endpoint.AbsoluteUri, token, NullLogger.Instance, identityPath: identity.Path,
-                ignoreStoredDeviceToken: true, persistHandshakeDeviceTokens: false);
+                ignoreStoredDeviceToken: true, persistHandshakeDeviceTokens: false)
+            {
+                SupportsExecApprovals = supportsExecApprovals,
+            };
             var owner = new ConnectedClient(client, identity);
             var handshake = Signal<bool>();
             var sessions = Signal<bool>();
