@@ -965,7 +965,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
         // (and again after settings saves) so speech does not fall back to Windows.
         if (_settings != null && _kokoroPrefetcher == null)
         {
-            _kokoroPrefetcher = new KokoroVoicePackPrefetcher(_settings, new AppLogger());
+            _kokoroPrefetcher = new KokoroVoicePackPrefetcher(
+                _settings, new AppLogger(), SettingsManager.SettingsDirectoryPath, KokoroPrefetchNetwork.IsMeteredConnection);
             _kokoroPrefetcher.Start();
         }
 
