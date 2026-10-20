@@ -48,7 +48,8 @@ roaming, over its data limit, or offline. A skipped or failed prefetch waits for
 the next launch or save. Deleting the pack in Voice settings clears
 `TtsKokoroAutoDownload` so it is not fetched again; Download sets it. Every waiter
 on the shared transfer receives its progress, so Voice settings attaches to a
-running prefetch on load or voice selection instead of showing "not downloaded".
+running prefetch on load, voice selection, or a provider/TTS change that starts
+one, instead of showing "not downloaded".
 
 Settings schema v2 moves a schema v1 `piper` provider with no downloaded Piper
 voice to Kokoro once. Setup writes settings.json without a provider, and v1
