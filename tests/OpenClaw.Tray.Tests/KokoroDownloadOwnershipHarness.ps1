@@ -48,7 +48,12 @@ public static class Logger
     public static void Debug(string text) { }
     public static void Error(string text) { }
 }
-public sealed class SettingsManager { public static string SettingsDirectoryPath = "unused-in-memory"; }
+public sealed class SettingsManager
+{
+    public static string SettingsDirectoryPath = "unused-in-memory";
+    public bool TtsKokoroAutoDownload = true;
+    public void Save() { }
+}
 public sealed class AppState { public SettingsManager Settings = new(); }
 public sealed record KokoroModelPackInfo(string PackId, long TotalSizeBytes);
 public sealed record Voice(string LanguageTag);
