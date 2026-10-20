@@ -214,6 +214,10 @@ public sealed partial class VoiceSettingsPage : Page
         if (_suppressEvents || CurrentApp.Settings == null) return;
         // Use centralized SetChatSpeakerMuted which persists + broadcasts
         (App.Current as App)?.SetChatSpeakerMuted(!TtsResponseToggle.IsOn);
+        // The persisted save can start a Kokoro prefetch; attach this page to it
+        // like a provider change does.
+        JoinActiveKokoroDownload();
+        UpdateKokoroVoiceState();
     }
 
     private void OnAudioFeedbackToggled(object sender, RoutedEventArgs e)
@@ -640,7 +644,9 @@ public sealed partial class VoiceSettingsPage : Page
     /// <summary>
     /// Attach the download controls to a transfer already running for the selected
     /// voice's pack (the background prefetch), so progress shows instead of "not downloaded".
-    /// Only called on page load and voice selection, never from a download's own completion.
+    /// Called on page load, voice selection, and any settings change that may have
+    /// started a prefetch (provider or TTS enable); never from a download's own
+    /// completion.
     /// </summary>
     private void JoinActiveKokoroDownload()
     {
@@ -1106,6 +1112,11 @@ public sealed partial class VoiceSettingsPage : Page
         }
         UpdateTtsProviderVisibility();
         UpdateCapabilityState();
+        // Save can start a background prefetch; attach so an in-flight download
+        // shows progress instead of a stale "not downloaded" panel (or refresh to
+        // the ready state when the transfer already finished).
+        JoinActiveKokoroDownload();
+        UpdateKokoroVoiceState();
     }
 
     private void OnOpenPermissionsClick(object sender, RoutedEventArgs e)
