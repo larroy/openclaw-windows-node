@@ -24,8 +24,11 @@ separate and does not claim or restore Companion management.
 After setup restarts Companion, destination handoff waits for native connection
 startup and any already-admitted Local AI recovery before fresh model verification.
 An unused receipt must still be acquired within five minutes. First exclusive
-acquisition persists one 13.5-minute execution window for the bounded phases below;
-neither restart nor retry renews it. A failed attempt remains available for explicit Retry,
+acquisition persists one execution window for the bounded phases below: 13.5 minutes
+at the default startup budget, longer with `OPENCLAW_NATIVE_GATEWAY_START_TIMEOUT`.
+Neither restart nor retry renews it. A restart with a different startup override keeps the
+stored window when it falls within the range a supported override can produce (13.5 to
+127.5 minutes). A failed attempt remains available for explicit Retry,
 but automatic reactivation does not show the same failure dialog again. Successful
 runtime checks alone do not prove that a full, potentially longer chat turn has finished.
 
