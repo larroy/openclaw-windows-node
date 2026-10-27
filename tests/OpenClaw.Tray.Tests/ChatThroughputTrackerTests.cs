@@ -211,4 +211,25 @@ public class ChatThroughputTrackerTests
 
         Assert.Equal(ChatThroughputStats.Empty, _tracker.Get("b"));
     }
+
+    [Fact]
+    public void InvalidateRuns_KeepsSamplesAndAdoptsNextUsageAsBaseline()
+    {
+        _tracker.StartRun("main");
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(_tracker.ObserveRunUsage("main", 100));
+
+        _tracker.ObserveText("main", 10); // open window at invalidation
+        _tracker.InvalidateRuns();
+        Assert.Null(_tracker.Get("main").LiveTokensPerSecond);
+
+        _tracker.ObserveText("main", 10);
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.False(_tracker.ObserveRunUsage("main", 5000));
+
+        var stats = _tracker.Get("main");
+        Assert.Equal(1, stats.SampleCount);
+        Assert.Equal(50d, stats.LatestTokensPerSecond);
+    }
 }

@@ -70,6 +70,28 @@ internal sealed class ChatThroughputTracker(TimeProvider timeProvider)
         Changed?.Invoke(threadId);
     }
 
+    /// <summary>
+    /// Connection lost or re-established: run lifecycle events may have been missed for every
+    /// thread, so close open segments and mark baselines unknown. The next <c>usage</c> total of a
+    /// run in progress then only becomes the baseline instead of one outlier sample. Completed
+    /// samples are kept.
+    /// </summary>
+    public void InvalidateRuns()
+    {
+        string[] threadIds;
+        lock (_gate)
+        {
+            threadIds = [.. _threads.Keys];
+            foreach (var state in _threads.Values)
+            {
+                state.ClearSegment();
+                state.RunBaselineKnown = false;
+            }
+        }
+        foreach (var threadId in threadIds)
+            Changed?.Invoke(threadId);
+    }
+
     /// <summary>Records streamed assistant or reasoning text; the first call opens the segment window.</summary>
     public void ObserveText(string threadId, int characters)
     {

@@ -1177,6 +1177,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 transition.HistoryGeneration,
                 ChatTelemetryOutcome.Canceled,
                 ChatTurnTelemetryReason.Disconnected);
+            _throughput.InvalidateRuns();
         }
         Publish(transition.Snapshot);
 
