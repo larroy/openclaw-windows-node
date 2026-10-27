@@ -413,8 +413,7 @@ public sealed class OpenClawReactorChatRoot : Component<OpenClawReactorChatRootP
                 props.Provider as OpenClawChatDataProvider,
                 effectiveThread.Id,
                 contextUsage,
-                timeline.TurnActive,
-                props.IsCompact));
+                timeline.TurnActive));
         return Grid(
             [GridSize.Star()],
             [showWelcome ? GridSize.Auto : GridSize.Star(), GridSize.Auto, showWelcome ? GridSize.Star() : GridSize.Auto, GridSize.Auto],

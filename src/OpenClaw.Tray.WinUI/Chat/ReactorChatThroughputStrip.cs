@@ -12,8 +12,7 @@ internal sealed record ReactorChatThroughputStripProps(
     OpenClawChatDataProvider? Provider,
     string ThreadId,
     ChatContextUsage? Context,
-    bool TurnActive,
-    bool IsCompact);
+    bool TurnActive);
 
 /// <summary>
 /// Declarative caption strip below the composer: tokens/sec (current, mean, p95) and a
@@ -24,12 +23,15 @@ internal sealed record ReactorChatThroughputStripProps(
 /// </summary>
 internal sealed class ReactorChatThroughputStrip : Component<ReactorChatThroughputStripProps>
 {
+    /// <summary>Viewport width below which the context bar shrinks so the tps text keeps room.</summary>
+    private const double NarrowContextBarBreakpoint = 400;
+
     public override Element Render()
     {
         var props = Props;
         var provider = props.Provider;
         var threadId = props.ThreadId;
-        var (viewportWidth, setViewportWidth) = UseState(props.IsCompact ? 480d : 800d);
+        var (viewportWidth, setViewportWidth) = UseState(800d);
         var (_, setRenderVersion) = UseState(0, threadSafe: true);
         var renderVersion = UseRef(0);
         UseEffect((Func<Action>)(() =>
@@ -85,7 +87,7 @@ internal sealed class ReactorChatThroughputStrip : Component<ReactorChatThroughp
 
         var text = ChatUsageFormatter.Format(ctx.UsedTokens, ctx.ContextTokens, ctx.Percent) ?? string.Empty;
         var label = LocalizationHelper.GetString("Chat_ContextUsage_Tooltip");
-        var barWidth = viewportWidth < ChatVisuals.CompactSessionBreakpoint ? 56d : 96d;
+        var barWidth = viewportWidth < NarrowContextBarBreakpoint ? 56d : 96d;
         var percent = Math.Clamp(ctx.Percent ?? 0, 0, 100);
         var fillKey = percent >= 90 ? "SystemFillColorCriticalBrush"
             : percent >= 75 ? "SystemFillColorCautionBrush"
