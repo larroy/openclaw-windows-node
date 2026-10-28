@@ -56,6 +56,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
     private KokoroVoicePackPrefetcher? _kokoroPrefetcher;
     private ILocalAiModelSwitcher? _localAiModelSwitcher;
     private DefaultModelGatewayService? _defaultModelGateway;
+    private ModelProviderGatewayService? _modelProviderGateway;
 
     /// <summary>
     /// Root DI composition root, built once during startup and disposed during
@@ -479,7 +480,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
             this,
             _localAiRuntime,
             _localAiModelSwitcher,
-            _defaultModelGateway);
+            _defaultModelGateway,
+            _modelProviderGateway);
 
         var services = new ServiceCollection();
         services.AddOpenClawTrayCore(context);
@@ -838,6 +840,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands, IPer
         {
             _defaultModelGateway = new DefaultModelGatewayService(
                 _appState, () => GatewayClient, () => _gatewayRegistry, _localAiGatewayLifecycle);
+            _modelProviderGateway = new ModelProviderGatewayService(() => GatewayClient);
         }
 
         // Build the DI composition root AFTER the tray is up, so additive plumbing
