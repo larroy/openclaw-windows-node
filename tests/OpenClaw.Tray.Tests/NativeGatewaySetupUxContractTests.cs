@@ -109,21 +109,36 @@ public sealed class NativeGatewaySetupUxContractTests
     [Fact]
     public void NativeAcquisition_ExplainsWinGetAndMicrosoftStoreInLocalizedResources()
     {
+        var expectedElapsedUnit = new Dictionary<string, string>
+        {
+            ["en-us"] = "{0} min",
+            ["fr-fr"] = "{0} min",
+            ["nl-nl"] = "{0} min",
+            ["pt-br"] = "{0} min",
+            ["zh-cn"] = "{0} 分钟",
+            ["zh-tw"] = "{0} 分鐘",
+        };
         var root = TestRepositoryPaths.GetRepositoryRoot();
         var strings = Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Strings");
         foreach (var path in Directory.GetFiles(strings, "Resources.resw", SearchOption.AllDirectories))
         {
-            var resources = XDocument.Load(path).Descendants("data")
+            var document = XDocument.Load(path);
+            var resources = document.Descendants("data")
                 .ToDictionary(element => (string)element.Attribute("name")!,
                     element => element.Element("value")?.Value);
             Assert.Contains("WinGet", resources["Onboarding_Native_Acquisition.Text"]);
             Assert.Contains("Microsoft Store", resources["Onboarding_Native_Acquisition.Text"]);
             Assert.Contains("WinGet", resources["Onboarding_Native_InstallingPackage"]);
             Assert.Contains("Microsoft Store", resources["Onboarding_Native_InstallingPackageWaiting"]);
-            Assert.Contains("{0}", resources["Onboarding_Native_InstallingPackageWaiting"]);
+            var locale = Path.GetFileName(Path.GetDirectoryName(path))!;
+            if (!expectedElapsedUnit.TryGetValue(locale, out var expected))
+                Assert.Fail($"Add an elapsed-minute unit expectation for {locale}");
+            Assert.Contains(expected!, resources["Onboarding_Native_InstallingPackageWaiting"]);
             Assert.Contains("WinGet", resources["Onboarding_Native_VerifyingPackage"]);
             Assert.Contains("WinGet", resources["Onboarding_Native_Cancelled"]);
             Assert.False(resources.ContainsKey("Onboarding_Native_InstallerOpened"));
+            Assert.DoesNotContain(document.Root!.Nodes().OfType<XText>(),
+                node => !string.IsNullOrWhiteSpace(node.Value));
         }
     }
 

@@ -34,7 +34,7 @@ public sealed partial class NativeGatewaySetupPage : Page
     private readonly List<SetupPhaseStatus> _rows = [];
     private int _currentStep;
     internal bool IsBusy => _operation is { IsCompleted: false };
-    private static readonly TimeSpan WaitingProgressInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan WaitingProgressInterval = TimeSpan.FromMinutes(1);
 
     public NativeGatewaySetupPage()
     {
@@ -300,7 +300,7 @@ public sealed partial class NativeGatewaySetupPage : Page
             {
                 while (await progress.WaitForNextTickAsync(cancellationToken))
                 {
-                    var minutes = (int)stopwatch.Elapsed.TotalMinutes;
+                    var minutes = (int)Math.Round(stopwatch.Elapsed.TotalMinutes);
                     var message = string.Format(CultureInfo.CurrentCulture,
                         SetupLocalization.GetString("Onboarding_Native_InstallingPackageWaiting"), minutes);
                     var dispatcher = DispatcherQueue;

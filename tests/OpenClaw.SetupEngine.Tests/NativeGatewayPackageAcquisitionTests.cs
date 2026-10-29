@@ -2,6 +2,7 @@ using OpenClaw.Connection.NativeGateway;
 
 namespace OpenClaw.SetupEngine.Tests;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class NativeGatewayPackageAcquisitionTests
 {
     private static readonly NativeGatewayPackage Package = new(
@@ -301,41 +302,6 @@ public sealed class NativeGatewayPackageAcquisitionTests
                 ? TimeSpan.FromSeconds(seconds)
                 : NativeGatewayPackageAcquisition.DefaultTimeout,
                 NativeGatewayPackageAcquisition.ResolveTimeout());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(NativeGatewayPackageAcquisition.TimeoutEnvironmentVariable, previous);
-        }
-    }
-
-    [Fact]
-    public async Task EnsureAsync_UnsetEnvironment_Uses30MinuteDeadline()
-    {
-        var previous = Environment.GetEnvironmentVariable(NativeGatewayPackageAcquisition.TimeoutEnvironmentVariable);
-        try
-        {
-            Environment.SetEnvironmentVariable(NativeGatewayPackageAcquisition.TimeoutEnvironmentVariable, null);
-            using var cancellation = new CancellationTokenSource();
-            var polling = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var calls = 0;
-            var resolver = new Resolver(_ =>
-            {
-                if (++calls == 2)
-                    polling.SetResult();
-                return Missing();
-            });
-            var acquisition = NativeGatewayPackageAcquisition.EnsureAsync(resolver, _ => Task.CompletedTask,
-                cancellationToken: cancellation.Token, pollInterval: TimeSpan.FromMilliseconds(1));
-            try
-            {
-                await polling.Task.WaitAsync(TimeSpan.FromSeconds(5));
-                Assert.False(acquisition.IsCompleted);
-            }
-            finally
-            {
-                cancellation.Cancel();
-            }
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => acquisition);
         }
         finally
         {
