@@ -257,8 +257,10 @@ Microsoft Store owns architecture/package selection, signature validation and
 deployment. WinGet runs through the signed-in user's App Installer execution alias,
 without a shell or elevation. Companion verifies actual package registration and aliases, then
 automatically prepares the profile and opens **Connect your AI**.
-Installation and verification share a cancellable five-minute deadline. Cancellation
-stops the WinGet request, but Windows may still finish an in-progress deployment.
+Installation and verification share a cancellable 30-minute deadline by default.
+Set `OPENCLAW_SETUP_PACKAGE_ACQUISITION_TIMEOUT` to override it in seconds
+(1 through 2147483). Invalid values warn and keep the default.
+Cancellation stops the WinGet request, but Windows may still finish an in-progress deployment.
 If WinGet reports stale Microsoft Store certificate pins (`0x8A15005E`), Companion
 runs one current-user `Repair-WinGetPackageManager -Force -Latest` bootstrap and retries once.
 The repair installs Microsoft's WinGet client module; it never bypasses certificate validation.
