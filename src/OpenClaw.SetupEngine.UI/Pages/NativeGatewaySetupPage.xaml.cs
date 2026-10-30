@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using CommunityToolkit.WinUI.Controls;
@@ -301,8 +300,7 @@ public sealed partial class NativeGatewaySetupPage : Page
                 while (await progress.WaitForNextTickAsync(cancellationToken))
                 {
                     var minutes = (int)Math.Round(stopwatch.Elapsed.TotalMinutes);
-                    var message = string.Format(CultureInfo.CurrentCulture,
-                        SetupLocalization.GetString("Onboarding_Native_InstallingPackageWaiting"), minutes);
+                    var message = SetupLocalization.Format("Onboarding_Native_InstallingPackageWaiting", minutes);
                     var dispatcher = DispatcherQueue;
                     if (dispatcher.HasThreadAccess)
                     {

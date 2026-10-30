@@ -292,7 +292,7 @@ public sealed class NativeGatewayPackageAcquisitionTests
     [InlineData("0", null)]
     [InlineData("not-a-number", null)]
     [InlineData("2147484", null)]
-    public void Timeout_EnvironmentOverride_IsUsedAndWarnsOnlyOnInvalidValues(string value, int? expectedSeconds)
+    public void Timeout_EnvironmentOverride_IsUsedOnlyForValidValues(string value, int? expectedSeconds)
     {
         var previous = Environment.GetEnvironmentVariable(NativeGatewayPackageAcquisition.TimeoutEnvironmentVariable);
         try
@@ -317,9 +317,12 @@ public sealed class NativeGatewayPackageAcquisitionTests
         {
             Environment.SetEnvironmentVariable(NativeGatewayPackageAcquisition.TimeoutEnvironmentVariable, "300");
             var resolver = new Resolver(_ => Missing());
+            // Bound the wait well below the environment's 300 s so an env-wins regression fails
+            // fast: WaitAsync's own TimeoutException lacks the acquisition retry guidance below.
             var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
                 NativeGatewayPackageAcquisition.EnsureAsync(resolver, _ => Task.CompletedTask,
-                    timeout: TimeSpan.FromMilliseconds(50), pollInterval: TimeSpan.FromMilliseconds(1)));
+                    timeout: TimeSpan.FromMilliseconds(50), pollInterval: TimeSpan.FromMilliseconds(1))
+                    .WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.Contains("Check WinGet and Microsoft Store access", exception.Message);
             Assert.Contains("retry native setup", exception.Message);
         }

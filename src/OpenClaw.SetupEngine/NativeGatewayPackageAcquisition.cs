@@ -19,14 +19,6 @@ public static class NativeGatewayPackageAcquisition
     internal static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>
-    /// Resolves before installing, installs at most once, and retries only missing registration.
-    /// The total deadline includes installation and verification and defaults to 30 minutes
-    /// unless <paramref name="timeout"/> or <c>OPENCLAW_SETUP_PACKAGE_ACQUISITION_TIMEOUT</c>
-    /// overrides it. Cancellation reaches the installer, which must honor its token. Await its
-    /// cleanup before releasing setup ownership; Windows deployment may outlive the cancelled
-    /// WinGet process.
-    /// </summary>
-    /// <summary>
     /// Resolves the acquisition deadline. Unset or blank keeps <see cref="DefaultTimeout"/>.
     /// A positive integer of at most <c>int.MaxValue / 1000</c> is seconds; any other value
     /// warns and keeps the default.
@@ -47,10 +39,18 @@ public static class NativeGatewayPackageAcquisition
             TimeoutEnvironmentVariable,
             raw,
             int.MaxValue / 1000,
-            30);
+            (int)DefaultTimeout.TotalMinutes);
         return DefaultTimeout;
     }
 
+    /// <summary>
+    /// Resolves before installing, installs at most once, and retries only missing registration.
+    /// The total deadline includes installation and verification and defaults to 30 minutes
+    /// unless <paramref name="timeout"/> or <c>OPENCLAW_SETUP_PACKAGE_ACQUISITION_TIMEOUT</c>
+    /// overrides it. Cancellation reaches the installer, which must honor its token. Await its
+    /// cleanup before releasing setup ownership; Windows deployment may outlive the cancelled
+    /// WinGet process.
+    /// </summary>
     public static async Task<NativeGatewayPackage> EnsureAsync(
         INativeGatewayPackageResolver resolver,
         Func<CancellationToken, Task> installPackage,
